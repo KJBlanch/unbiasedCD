@@ -7,6 +7,9 @@ using InteractiveUtils
 # ╔═╡ 03fcb360-421d-441a-bd8c-5372d6bb2be5
 using PlutoUI # To enable table of contents
 
+# ╔═╡ 37c90723-2e16-4e40-a259-74edf117c6e2
+using Zygote # For gradient dict
+
 # ╔═╡ 61ce3068-a319-4f67-b4fd-25745727f0a1
 using Flux # Julias main Deep Learning library. We don't need autodiff for this project, but Flux is still useful for activation functions and stateful optimizers.
 
@@ -33,13 +36,12 @@ md"
 "
 
 # ╔═╡ d9e2c1de-ee61-4413-8b41-8bcad7206d1d
-md"## How to train an RBM with standard CD
+md"## How to train an RBM with standard CD-k
 Geoffrey Hinton's *A Practical Guide to Training Restricted Boltzmann Machines* is a good starting point for understanding Restricted Boltzmann Machines. Asja Fischer's and Cristian Igel's *Training Restricted Boltzmann Machines: An Introduction* is also very useful, and is highlighted in the *Unbiased Contrastive Divergence (...)* paper which we are studying.
 "
 
 # ╔═╡ adb63694-4f58-4d96-84c2-87e3fd69d5ec
 md"### The RMB energy function
-
 "
 
 # ╔═╡ 5a5299e2-4a18-4a52-ae87-453380edc682
@@ -57,6 +59,13 @@ mutable struct rbmstruct
 	a::Array{Float32, 1}
 end
 
+# ╔═╡ 6d210251-d433-43b6-b515-c852ccbc1feb
+function energy(rbm, v, h, batchsize)
+	# TODO: recheck this implementation
+	E = sum(rbm.a .* v) - sum(rbm.b .* h) - sum(h*v' .* W)
+	return E/batchsize
+end
+
 # ╔═╡ b775575b-33e7-4708-8c6e-4c28f9cfa79f
 md" We will generate some quick random data to try out our energy function with. We will force the hidden units to be binary variables for now using the Heaviside step function."
 
@@ -64,35 +73,15 @@ md" We will generate some quick random data to try out our energy function with.
 heaviside(x) = 0.5 * (sign(x) + 1)
 
 # ╔═╡ a9c6ecab-bc6c-4565-9a29-7d07b95c2de9
-begin
-	numvisible = 784
-	numhidden = 200
-	batchsize = 64
+function init_rbm(numvisible=784, numhidden=64, batchsize=64)
+	
 	# Some initial network parameters
-	W = randn(Float32, numhidden, numvisible)
-	a = randn(Float32, numvisible)
-	b = randn(Float32, numhidden)
-	# some dummy state vectors
-	h = heaviside.(rand(Float32, (numhidden, batchsize)) .- 0.5)
-	v = heaviside.(rand(Float32, (numvisible, batchsize)) .- 0.5)
+	W = Flux.glorot_normal(numhidden, numvisible)
+	a = Flux.glorot_normal(numvisible)
+	b = zeros(Float32, numhidden)
+
+	return rbmstruct(W, b, a);
 end;
-
-# ╔═╡ 4f485f1b-33ff-4ea9-a67e-11e5841fcd62
-# Initialize the network
-rbm = rbmstruct(W, b, a);
-
-# ╔═╡ 6d210251-d433-43b6-b515-c852ccbc1feb
-function energy(rmb, v, h, batchsize)
-	# TODO: recheck this implementation
-	E = sum(rbm.a .* v) - sum(rbm.b .* h) - sum(h*v' .* W)
-	return E/batchsize
-end
-
-# ╔═╡ 7d86146b-dee5-477e-b476-4a1d888831aa
-md"Let's check what the energy of our randomly initialized network is!"
-
-# ╔═╡ 8b171005-2f80-492a-bf0a-e85088d498a0
-energy(rbm, v, h, batchsize)
 
 # ╔═╡ 3047d526-f2b6-48f3-b5e1-d5290eddb25a
 md"### The training objective
@@ -230,7 +219,7 @@ md"We will use the FMNISTloader function to load the FMNIST data set. Let's have
 
 # ╔═╡ 31a4f5c7-9d7b-47a8-a27a-3a421fc0f10f
 function imshow(imgvec) 
-	heatmap(rotr90(reshape(imgvec, (28,28)), 3), c=:grays)
+	heatmap(rotr90(reshape(imgvec, (28,28)), 3), c=:grays, colorbar=false, xticks=false, yticks=false, border=:none, aspect_ratio=:equal, size=(100,100))
 end
 
 # ╔═╡ 7906a124-67ea-42ae-8f27-80eaba3e3368
@@ -247,13 +236,22 @@ md"### Training the RBM
 
 # ╔═╡ 6b10fdc8-e871-4de1-b2cb-e81c610823e3
 function train(rbm)
-	η = 0.1
-	batchsize = 128
-	k = 1
-	numepochs = 5
+	# TODO: Move these parameters to a separate argument struct
+	batchsize = 64
+	k = 5
+	numepochs = 10
 	trainloader, testloader = FMNISTdataloader(batchsize)
-
+	# Choose optimizer
+	η = 0.1; optimizer = Descent(η) # SGD
+	# η = 0.02; optimizer = Momentum(η)
+	# η = 0.0003; optimizer = ADAM(η)
+	
+	# We use Zygotes graddict in order to use Flux's optimizers
+	θ = Flux.params(rbm.W, rbm.a, rbm.b)
+    ∇θ = Zygote.Grads(IdDict(), θ)
+	
 	# Arrays for storing the variables
+	numvisible, numhidden = length(rbm.a), length(rbm.b)
 	hpos = zeros(Float32, (numhidden, batchsize))
 	vpos = zeros(Float32, (numvisible, batchsize))
 	hneg = zeros(Float32, (numhidden, batchsize))
@@ -264,48 +262,43 @@ function train(rbm)
 			vpos = x
 			hpos = inference_pos!(rbm, vpos, hpos)
 
-			# randomly initialize the inputs and perform k Gibbs sampling steps
-			md"size(vneg):    $(size(vneg))"
+			# Randomly initialize the inputs and perform k Gibbs sampling steps
 			vneg = heaviside.(rand(Float32, (numvisible, batchsize)) .- 0.5)
 			vneg, hneg = inference_neg!(rbm, vneg, hneg, k)
-
+			
+			# Compute gradient terms
 			∇pos = ∇E(vpos, hpos, batchsize)
 			∇neg = ∇E(vneg, hneg, batchsize)
-
-			∇W = -∇pos[1] + ∇neg[1]
-			∇a = -∇pos[2] + ∇neg[2]
-			∇b = -∇pos[3] + ∇neg[3]
-
-			rbm.W -= η*∇W
-			rbm.a -= η*∇a
-			rbm.b -= η*∇b
+			
+			for i=1:3
+			∇θ.grads[θ[i]] = -∇pos[i] + ∇neg[i]
+			end
+			
+			Flux.Optimise.update!(optimizer, θ, ∇θ)
 
 		end
-		md"Epoch $epoch of $numepochs"
-		#with_terminal() println("Epoch: ", epoch, " finished")
 	end
-	
+	return rbm
 end
 
-# ╔═╡ 4e6525d2-9c27-48bd-8cd6-170632655502
-begin
-		hpos = zeros(Float32, (numhidden, batchsize))
-		vpos = zeros(Float32, (numvisible, batchsize))
-		hneg = zeros(Float32, (numhidden, batchsize))
-		vneg = zeros(Float32, (numvisible, batchsize))
-end;
+# ╔═╡ 5690fc6d-d3b4-478c-8efe-cd2c03a915af
+md"We can now initialize an RBM with random weights and train it!."
 
-# ╔═╡ b4a1f75f-f34d-43f8-ac78-1ad00591253a
-inference_pos!(rbm, vpos, hpos);
+# ╔═╡ 944f0cf9-8302-41f4-9b9d-f90523827bac
+# Initialize the network
+rbm = init_rbm(); train(rbm);
 
-# ╔═╡ eca8a01b-d0c4-4272-809b-6c61ea06609f
-train(rbm)
+# ╔═╡ 711787c1-f8fc-4fac-92c2-21a01ab4937d
+md"### Visualizing the filters"
 
 # ╔═╡ 6cc91180-c85f-4e46-93bb-668234023328
-[imshow(rbm.W'[:,1]) for i=1:8]
+filters = [imshow(rbm.W'[:,i]) for i=1:64];
 
-# ╔═╡ acf7b39e-2b6f-4754-8802-55cf2d0d11fe
+# ╔═╡ f0c0bf3b-3329-4619-ba86-366b7abe3c79
+plot(filters..., layout=(8, 8), size=(1200, 1200))
 
+# ╔═╡ 0ca12440-3025-48ff-9aa7-aed2ed01d9f6
+md"### Generating samples"
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -314,12 +307,14 @@ Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 MLDatasets = "eb30cadb-4394-5ae3-aed4-317e484a6458"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
 Flux = "~0.12.6"
 MLDatasets = "~0.5.9"
 Plots = "~1.19.4"
 PlutoUI = "~0.7.9"
+Zygote = "~0.6.17"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -1470,6 +1465,7 @@ version = "0.9.1+5"
 
 # ╔═╡ Cell order:
 # ╠═03fcb360-421d-441a-bd8c-5372d6bb2be5
+# ╠═37c90723-2e16-4e40-a259-74edf117c6e2
 # ╠═61ce3068-a319-4f67-b4fd-25745727f0a1
 # ╠═360c13ed-0452-4811-a192-fa21968aae04
 # ╠═118b4c69-d21a-4a35-909a-f1631e83b917
@@ -1478,7 +1474,7 @@ version = "0.9.1+5"
 # ╟─9e830b5e-f37f-11eb-083f-277a24c3cd6c
 # ╟─1a5a0086-cfba-470f-955f-82df7c5f19de
 # ╟─d9e2c1de-ee61-4413-8b41-8bcad7206d1d
-# ╠═adb63694-4f58-4d96-84c2-87e3fd69d5ec
+# ╟─adb63694-4f58-4d96-84c2-87e3fd69d5ec
 # ╟─5a5299e2-4a18-4a52-ae87-453380edc682
 # ╟─d33cc5e2-9135-4dd0-b043-67ff5b5edaf6
 # ╠═5179313d-576f-4433-82cc-bf2cb7907abd
@@ -1486,9 +1482,6 @@ version = "0.9.1+5"
 # ╟─b775575b-33e7-4708-8c6e-4c28f9cfa79f
 # ╠═72a1fd39-2980-4f14-9a67-5362f9bb0775
 # ╠═a9c6ecab-bc6c-4565-9a29-7d07b95c2de9
-# ╠═4f485f1b-33ff-4ea9-a67e-11e5841fcd62
-# ╟─7d86146b-dee5-477e-b476-4a1d888831aa
-# ╠═8b171005-2f80-492a-bf0a-e85088d498a0
 # ╟─3047d526-f2b6-48f3-b5e1-d5290eddb25a
 # ╟─85a021d9-eddf-4167-817a-fcee142924ae
 # ╟─5d905b9a-6c86-4361-8c84-39cb320c071e
@@ -1523,10 +1516,11 @@ version = "0.9.1+5"
 # ╠═7a782a84-3615-4ad7-b6bb-a500966cb5ac
 # ╟─a6a0df67-885d-4799-b3cb-864f09f629a7
 # ╠═6b10fdc8-e871-4de1-b2cb-e81c610823e3
-# ╠═4e6525d2-9c27-48bd-8cd6-170632655502
-# ╠═b4a1f75f-f34d-43f8-ac78-1ad00591253a
-# ╠═eca8a01b-d0c4-4272-809b-6c61ea06609f
+# ╟─5690fc6d-d3b4-478c-8efe-cd2c03a915af
+# ╠═944f0cf9-8302-41f4-9b9d-f90523827bac
+# ╠═711787c1-f8fc-4fac-92c2-21a01ab4937d
 # ╠═6cc91180-c85f-4e46-93bb-668234023328
-# ╠═acf7b39e-2b6f-4754-8802-55cf2d0d11fe
+# ╠═f0c0bf3b-3329-4619-ba86-366b7abe3c79
+# ╠═0ca12440-3025-48ff-9aa7-aed2ed01d9f6
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
