@@ -167,15 +167,15 @@ md"So we need two functions. One for infering hidden units in the positive phase
 # ╔═╡ 93ca8efa-1bc5-473c-83cc-5994af633659
 function inference_pos!(rbm, v, h)
 	# Infer the hidden units given fixed visible units
-	r = rand(Float32, size(h))
+	#r = rand(Float32, size(h))
 	p = Flux.σ.(rbm.W * v .+ rbm.b)
-	h .= p .> r
-	return h
+	#h .= p .> r
+	return p
 end
 
 # ╔═╡ 91d233f2-12d3-4594-b68e-5a6b3d8e633f
 function inference_neg!(rbm, v, h, k)
-	for i=1:k
+	for i=1:k-1
 		# Infer hidden units given the current visible units
 		r = rand(Float32, size(h))
 		p = Flux.σ.(rbm.W * v .+ rbm.b)
@@ -185,6 +185,7 @@ function inference_neg!(rbm, v, h, k)
 		p = Flux.σ.(rbm.W' * h .+ rbm.a) # transpose W?
 		v .= p .> r
 	end
+	h = Flux.σ.(rbm.W * v .+ rbm.b)
 	return v, h
 end
 
@@ -239,7 +240,7 @@ function train(rbm)
 	# TODO: Move these parameters to a separate argument struct
 	batchsize = 64
 	k = 5
-	numepochs = 10
+	numepochs = 5
 	trainloader, testloader = FMNISTdataloader(batchsize)
 	# Choose optimizer
 	η = 0.1; optimizer = Descent(η) # SGD
@@ -263,7 +264,7 @@ function train(rbm)
 			hpos = inference_pos!(rbm, vpos, hpos)
 
 			# Randomly initialize the inputs and perform k Gibbs sampling steps
-			vneg = heaviside.(rand(Float32, (numvisible, batchsize)) .- 0.5)
+			vneg = deepcopy(vpos)#heaviside.(rand(Float32, (numvisible, batchsize)) .- 0.5)
 			vneg, hneg = inference_neg!(rbm, vneg, hneg, k)
 			
 			# Compute gradient terms
@@ -298,7 +299,40 @@ filters = [imshow(rbm.W'[:,i]) for i=1:64];
 plot(filters..., layout=(8, 8), size=(1200, 1200))
 
 # ╔═╡ 0ca12440-3025-48ff-9aa7-aed2ed01d9f6
-md"### Generating samples"
+md"### Reconstruction
+- *TODO*: Verify that reconstruction is implemented correctly!
+"
+
+# ╔═╡ 816e0fe7-add7-41e9-8a8c-41d67c44eec8
+function reconstruct(rbm, batchsize)
+
+	vin = testloader.data[1][:,1:batchsize];
+	
+	r = rand(Float32, size(rbm.b))
+	p = Flux.σ.(rbm.W * vin .+ rbm.b)
+	h = p .> r	
+	
+	#r = rand(Float32, size(rbm.a))
+	vout = Flux.σ.(rbm.W' * h .+ rbm.a) # transpose W?
+	#vout = p .> r
+	
+	return vin, vout
+end
+
+# ╔═╡ 9cef19bc-5295-456d-b6fe-a7cb1099fa6f
+x, xrec = reconstruct(rbm, 64);
+
+# ╔═╡ 1098fb24-b08a-4598-b44d-8f356877af25
+img_orig = [imshow(x[:,i]) for i=1:64];
+
+# ╔═╡ 004f1d73-b909-47da-b25d-aa83787520e9
+img_rec = [imshow(xrec[:,i]) for i=1:64];
+
+# ╔═╡ b2046d69-f61a-4c47-8277-f8d5029035ac
+plot(img_orig..., layout=(8, 8), size=(1200, 1200))
+
+# ╔═╡ 8799394c-cec1-4555-b4cb-1c4e7f386a33
+plot(img_rec..., layout=(8, 8), size=(1200, 1200))
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1521,6 +1555,12 @@ version = "0.9.1+5"
 # ╠═711787c1-f8fc-4fac-92c2-21a01ab4937d
 # ╠═6cc91180-c85f-4e46-93bb-668234023328
 # ╠═f0c0bf3b-3329-4619-ba86-366b7abe3c79
-# ╠═0ca12440-3025-48ff-9aa7-aed2ed01d9f6
+# ╟─0ca12440-3025-48ff-9aa7-aed2ed01d9f6
+# ╠═816e0fe7-add7-41e9-8a8c-41d67c44eec8
+# ╠═9cef19bc-5295-456d-b6fe-a7cb1099fa6f
+# ╠═1098fb24-b08a-4598-b44d-8f356877af25
+# ╠═004f1d73-b909-47da-b25d-aa83787520e9
+# ╠═b2046d69-f61a-4c47-8277-f8d5029035ac
+# ╠═8799394c-cec1-4555-b4cb-1c4e7f386a33
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
