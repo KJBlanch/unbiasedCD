@@ -17,7 +17,7 @@ using Flux # Julias main Deep Learning library. We don't need autodiff for this 
 using MLDatasets # For loading the FMNIST dataset
 
 # ╔═╡ 118b4c69-d21a-4a35-909a-f1631e83b917
-using Plots
+using Plots # For plotting
 
 # ╔═╡ 8b11badc-2a03-4918-841a-a6459d1aac28
 PlutoUI.TableOfContents(depth = 6)
@@ -26,7 +26,7 @@ PlutoUI.TableOfContents(depth = 6)
 html"<button onclick='present()'>present</button>"
 
 # ╔═╡ 9e830b5e-f37f-11eb-083f-277a24c3cd6c
-md"# Unbiased Contrastive Divergence
+md"# Notebook Reimplimentation of Unbiased Contrastive Divergence
 The paper *Unbiased Contrastive Divergence Algorithm for Training Energy-Based Latent Variable Models* by Yiuxuan Qiu, Lingsong Zhang and Xiao Wang highlights a known an issue with the Contrastive Divergence algorithm. Namely the fact that it produces biased gradient estimates. Qiu et al proposes a novel and computationally efficient way to solve this issue based on recent advances in MCMC methods.
 "
 
@@ -36,12 +36,12 @@ md"
 "
 
 # ╔═╡ d9e2c1de-ee61-4413-8b41-8bcad7206d1d
-md"## How to train an RBM with standard CD-k
+md"# How to train an RBM with standard CD-k
 Geoffrey Hinton's *A Practical Guide to Training Restricted Boltzmann Machines* is a good starting point for understanding Restricted Boltzmann Machines. Asja Fischer's and Cristian Igel's *Training Restricted Boltzmann Machines: An Introduction* is also very useful, and is highlighted in the *Unbiased Contrastive Divergence (...)* paper which we are studying.
 "
 
 # ╔═╡ adb63694-4f58-4d96-84c2-87e3fd69d5ec
-md"### The RMB energy function
+md"## The RBM energy function
 "
 
 # ╔═╡ 5a5299e2-4a18-4a52-ae87-453380edc682
@@ -73,7 +73,7 @@ md" We will generate some quick random data to try out our energy function with.
 heaviside(x) = 0.5 * (sign(x) + 1)
 
 # ╔═╡ a9c6ecab-bc6c-4565-9a29-7d07b95c2de9
-function init_rbm(numvisible=784, numhidden=64, batchsize=64)
+function init_rbm(;numvisible=784, numhidden=64)
 	
 	# Some initial network parameters
 	W = Flux.glorot_normal(numhidden, numvisible)
@@ -84,7 +84,7 @@ function init_rbm(numvisible=784, numhidden=64, batchsize=64)
 end;
 
 # ╔═╡ 3047d526-f2b6-48f3-b5e1-d5290eddb25a
-md"### The training objective
+md"## The training objective
 
 "
 
@@ -131,13 +131,13 @@ md"For a single vector v and h we get the following estimate of the gradient. to
 # ╔═╡ 64dde393-ac97-4140-a69f-549bd7f7ce85
 function ∇E(v,h, batchsize)
 	∂E∂W = h*v'/batchsize
-	∂E∂a = sum(v, dims=2)[:]
-	∂E∂b = sum(h, dims=2)[:]
+	∂E∂a = sum(v, dims=2)[:]/batchsize
+	∂E∂b = sum(h, dims=2)[:]/batchsize
 	return ∂E∂W, ∂E∂a, ∂E∂b
 end
 
 # ╔═╡ 282f9d60-8d8a-40dd-b077-4afe3b3d6313
-md"### Performing Inference"
+md"## Performing Inference"
 
 # ╔═╡ e1880f54-cfc9-485e-b219-7849a893a838
 md"So to compute a learning signal we need to first compute values for the visible and the hidden units under both the data distribution $\langle\cdot\rangle_{data}$ and the model distribution $\langle\cdot\rangle_{model}$."
@@ -147,7 +147,7 @@ md"So to compute a learning signal we need to first compute values for the visib
 md"The statistics for the data distribution term is called the positive statistics and the statistics for the model term is called the negative statistics. For the positive phase the input units are clamped at values given by an input datapoint (an image for example). Each hidden unit will then be either in state 0 or state 1 given by the following probability (where $\sigma$ is the sigmoid activation function)"
 
 # ╔═╡ 0cc27c9c-ec58-4ef1-bd58-09954761020b
-md"$p(h_j=1|\pmb{v}) = \sigma(b_j + \sum_i v_i W_{ij})$"
+md"$p(h_j=1) = \sigma(b_j + \sum_i v_i W_{ij})$"
 
 # ╔═╡ 74461104-7080-4b58-a159-0b2b6ac5fac5
 md"So collecting statistics for the positive phase is easy. In a similar manner we get"
@@ -156,7 +156,7 @@ md"So collecting statistics for the positive phase is easy. In a similar manner 
 md"This is however not what we need to collect for the negative phase. Rather we need $p(\pmb{h},\pmb{v})$ which is less trivial. Hinton states that this can be achieved by initializing the visible units randomly and then performing alternating Gibbs sampling for a very long time. Gibbs sampling is the process of first updating all the hidden units and then updating the visible ones. "
 
 # ╔═╡ 8eb87c5b-c895-43c1-93aa-687275a31c87
-md"$p(v_i=1|\pmb{v}) = \sigma(a_i + \sum_j h_j W_{ij})$"
+md"$p(v_i=1) = \sigma(a_i + \sum_j h_j W_{ij})$"
 
 # ╔═╡ 37e880fa-70e7-47d1-b5a8-04cff3f5d828
 md"We are finally arriving at the Contrastive divergence algorithm which essentially amounts to cutting the repeated Gibbs sampling short, when collecting the negative statistics. CD-k means contrastive divergence with k iterations of Gibbs sampling. This algorithm is quite fast, but doesn't exactly approximate gradient of the log-probability of the data (which is what we set out to do). To make things even more confusing it is in fact closer to approximating the gradient of a function which itself is called Contrastive Divergence, though a term is omitted (Including this term was found to be both feasible and beneficial by *Du et al* in the paper *Improved Contrastive Divergence Training of Energy-Based Model* from 2021)."
@@ -167,15 +167,16 @@ md"So we need two functions. One for infering hidden units in the positive phase
 # ╔═╡ 93ca8efa-1bc5-473c-83cc-5994af633659
 function inference_pos!(rbm, v, h)
 	# Infer the hidden units given fixed visible units
-	#r = rand(Float32, size(h))
+	r = rand(Float32, size(h))
 	p = Flux.σ.(rbm.W * v .+ rbm.b)
-	#h .= p .> r
-	return p
+	h .= p .> r
+	return h
 end
 
 # ╔═╡ 91d233f2-12d3-4594-b68e-5a6b3d8e633f
 function inference_neg!(rbm, v, h, k)
-	for i=1:k-1
+	h = Flux.σ.(rbm.W * v .+ rbm.b)
+	for i=1:k
 		# Infer hidden units given the current visible units
 		r = rand(Float32, size(h))
 		p = Flux.σ.(rbm.W * v .+ rbm.b)
@@ -185,12 +186,11 @@ function inference_neg!(rbm, v, h, k)
 		p = Flux.σ.(rbm.W' * h .+ rbm.a) # transpose W?
 		v .= p .> r
 	end
-	h = Flux.σ.(rbm.W * v .+ rbm.b)
 	return v, h
 end
 
 # ╔═╡ 1b0875fd-975c-47f3-a1c1-6278084d77c5
-md"### Loading the FMNIST dataset
+md"## Loading the FMNIST dataset
 So now we have an initialized RBM, a function for computing the Energy (although we don't really need it) a function for computing gradients and finally functions for computing states of the hidden and visible units in the positive and negative phases. At this point it is probably time to get some real data and start training!"
 
 # ╔═╡ 343ad144-8b26-4c6c-8f3d-4cf042c46cf0
@@ -232,24 +232,40 @@ and store the produced heatmaps in an array.=#
 H = [imshow(view(trainloader.data[1], : ,i)) for i=1:8]
 
 # ╔═╡ a6a0df67-885d-4799-b3cb-864f09f629a7
-md"### Training the RBM
+md"## Training the RBM
 "
 
+# ╔═╡ 0c893210-9bd2-43b8-ab46-d9579707eed2
+function reconstruction_loss(rbm , xtest)
+	
+	vin = xtest
+	
+	r = rand(Float32, size(rbm.b))
+	h = Flux.σ.(rbm.W * vin .+ rbm.b)
+	h = h .> r	
+	
+	#r = rand(Float32, size(rbm.a))
+	vout = Flux.σ.(rbm.W' * h .+ rbm.a) # transpose W?
+	#vout = vout .> r
+	
+	loss = Flux.Losses.mse(vin, vout)
+	return loss
+end
+
 # ╔═╡ 6b10fdc8-e871-4de1-b2cb-e81c610823e3
-function train(rbm)
-	# TODO: Move these parameters to a separate argument struct
-	batchsize = 64
-	k = 5
-	numepochs = 5
+function train(rbm; numepochs=5, batchsize=64, k=3)
+
 	trainloader, testloader = FMNISTdataloader(batchsize)
 	# Choose optimizer
-	η = 0.1; optimizer = Descent(η) # SGD
+	η = 0.05; optimizer = Descent(η) # SGD
 	# η = 0.02; optimizer = Momentum(η)
 	# η = 0.0003; optimizer = ADAM(η)
 	
 	# We use Zygotes graddict in order to use Flux's optimizers
 	θ = Flux.params(rbm.W, rbm.a, rbm.b)
     ∇θ = Zygote.Grads(IdDict(), θ)
+	
+	recloss = zeros(Float32, numepochs)
 	
 	# Arrays for storing the variables
 	numvisible, numhidden = length(rbm.a), length(rbm.b)
@@ -259,6 +275,7 @@ function train(rbm)
 	vneg = zeros(Float32, (numvisible, batchsize))
 	
 	for epoch=1:numepochs
+		t1 = time()
 		for (x,y) in trainloader
 			vpos = x
 			hpos = inference_pos!(rbm, vpos, hpos)
@@ -278,8 +295,16 @@ function train(rbm)
 			Flux.Optimise.update!(optimizer, θ, ∇θ)
 
 		end
+		
+		recloss[epoch] = reconstruction_loss(rbm , testloader.data[1])
+		t2 = time()
+		# println output printed to console
+		println("Epoch: ", epoch, "/", numepochs, 
+				":\t recloss = ", round(recloss[epoch], digits=5),
+				"\t runtime: ", round(t2-t1, digits=2), " s")
+
 	end
-	return rbm
+	return recloss
 end
 
 # ╔═╡ 5690fc6d-d3b4-478c-8efe-cd2c03a915af
@@ -287,19 +312,23 @@ md"We can now initialize an RBM with random weights and train it!."
 
 # ╔═╡ 944f0cf9-8302-41f4-9b9d-f90523827bac
 # Initialize the network
-rbm = init_rbm(); train(rbm);
+begin
+	println("\nTraining RBM") # printed to console!
+	rbm = init_rbm(numvisible=784, numhidden=64)
+	recloss = train(rbm, numepochs=5, batchsize=64, k=2);
+end
 
 # ╔═╡ 711787c1-f8fc-4fac-92c2-21a01ab4937d
-md"### Visualizing the filters"
+md"## Visualizing the filters"
 
 # ╔═╡ 6cc91180-c85f-4e46-93bb-668234023328
 filters = [imshow(rbm.W'[:,i]) for i=1:64];
 
 # ╔═╡ f0c0bf3b-3329-4619-ba86-366b7abe3c79
-plot(filters..., layout=(8, 8), size=(1200, 1200))
+plot(filters..., layout=(8, 8), size=(2000, 2000))
 
 # ╔═╡ 0ca12440-3025-48ff-9aa7-aed2ed01d9f6
-md"### Reconstruction
+md"## Reconstruction
 - *TODO*: Verify that reconstruction is implemented correctly!
 "
 
@@ -309,12 +338,12 @@ function reconstruct(rbm, batchsize)
 	vin = testloader.data[1][:,1:batchsize];
 	
 	r = rand(Float32, size(rbm.b))
-	p = Flux.σ.(rbm.W * vin .+ rbm.b)
-	h = p .> r	
+	h = Flux.σ.(rbm.W * vin .+ rbm.b)
+	h = h .> r	
 	
 	#r = rand(Float32, size(rbm.a))
 	vout = Flux.σ.(rbm.W' * h .+ rbm.a) # transpose W?
-	#vout = p .> r
+	#vout = vout .> r
 	
 	return vin, vout
 end
@@ -333,6 +362,65 @@ plot(img_orig..., layout=(8, 8), size=(1200, 1200))
 
 # ╔═╡ 8799394c-cec1-4555-b4cb-1c4e7f386a33
 plot(img_rec..., layout=(8, 8), size=(1200, 1200))
+
+# ╔═╡ c17e8693-ea60-4388-848a-b208ac250690
+
+
+# ╔═╡ 79a8e531-6c29-4cf5-8429-0d7474b01f29
+md"# How to train an RBM with UCD
+"
+
+# ╔═╡ a1afe50c-3d5c-4c50-99dd-73aef979e24a
+md"## The basic idea"
+
+# ╔═╡ 3794e224-9bba-481d-b072-4abde652c627
+md" Here we will use the notation used by Qiu et al (the authors of the *Ubiased Contrastive Divergence (...)* paper). What we want to compute is"
+
+# ╔═╡ 55cee522-7a7d-409e-bcee-5dd6f41c701f
+md"
+```math
+	\begin{equation}
+		\frac{\partial l(\theta; \mathcal{D})}{\partial \theta} = 
+		-n \left[
+		\mathbb{E}(\pmb{v}, \pmb{h})
+		\tilde{}p(\pmb{h}|\pmb{v};\theta)\left(\frac{\partial E(\pmb{v}, \pmb{h}; 			\theta)}{\partialθ}\right) 
+		- \mathbb{E}(\pmb{v}, \pmb{h})
+		\tilde{}p(\pmb{h},\pmb{v};\theta)\left(\frac{\partial E(\pmb{v}, \pmb{h}; 			\theta)}{\partialθ}\right) 
+		\right].
+	\end{equation}
+```
+"
+
+# ╔═╡ 6a914ea6-349a-43b9-8152-6e4452786646
+md"The tricky part here is to estimate the second term. Typically this has been done with CD-k as mentioned above. Following Qiu's notation we have that $\pmb{x}=(\pmb{v}, \pmb{h})\in\mathbb{X}:=\mathbb{V}\times\mathbb{H}$ 
+and $f(\pmb{x}, \theta)=\partial E(\pmb{v},\pmb{h}; \theta)/\partial\theta$, 
+which lets us restate the problem as"
+
+# ╔═╡ a039ce76-e5e8-4d22-a23c-c1d03849ada3
+md"
+```math
+	\begin{equation}
+		\frac{\partial l(\theta; \mathcal{D})}{\partial \theta} = 
+		-n \left[
+		\mathbb{E}_\mathcal{D}\{f(\pmb{x},\theta)\}
+		- \mathbb{E}_\mathcal{M}\{f(\pmb{x},\theta)\}
+		\right].
+	\end{equation}
+```
+"
+
+# ╔═╡ 8b7f2e1c-d21d-4d51-83cc-6a118c34586d
+md"As noted before the CD-k algorithm is inherintly biased unless $k\rightarrow\infty$, which is unfeasible. Recall that the $k$ denotes the number of iterations of Gibbs sampling used to find $v$ and $h$ when estimating the model distribution term of the gradient. The different second term can be computed as a Markov chain (via repeated Gibbs sampling). This gives
+	$\lim_{t\rightarrow\infty}\mathbb{E}_\mathcal{M}\{f(\pmb{\xi_t},\theta)\}
+	= \mathbb{E}_\mathcal{M}\{f(\pmb{x},\theta)\}$.
+The CD-k approach truncates the Markov chain at k iterations, which results in a biased estimate of the gradient. 
+"
+
+# ╔═╡ 8f64ebad-d946-4f90-bbad-c2923fad1c65
+md"## How to get the chain \{$\eta_t\}$"
+
+# ╔═╡ 77b4d504-7eab-49e8-ab5e-b576250c5411
+md" ## RBM implementation"
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1549,10 +1637,11 @@ version = "0.9.1+5"
 # ╠═7906a124-67ea-42ae-8f27-80eaba3e3368
 # ╠═7a782a84-3615-4ad7-b6bb-a500966cb5ac
 # ╟─a6a0df67-885d-4799-b3cb-864f09f629a7
+# ╠═0c893210-9bd2-43b8-ab46-d9579707eed2
 # ╠═6b10fdc8-e871-4de1-b2cb-e81c610823e3
 # ╟─5690fc6d-d3b4-478c-8efe-cd2c03a915af
 # ╠═944f0cf9-8302-41f4-9b9d-f90523827bac
-# ╠═711787c1-f8fc-4fac-92c2-21a01ab4937d
+# ╟─711787c1-f8fc-4fac-92c2-21a01ab4937d
 # ╠═6cc91180-c85f-4e46-93bb-668234023328
 # ╠═f0c0bf3b-3329-4619-ba86-366b7abe3c79
 # ╟─0ca12440-3025-48ff-9aa7-aed2ed01d9f6
@@ -1562,5 +1651,15 @@ version = "0.9.1+5"
 # ╠═004f1d73-b909-47da-b25d-aa83787520e9
 # ╠═b2046d69-f61a-4c47-8277-f8d5029035ac
 # ╠═8799394c-cec1-4555-b4cb-1c4e7f386a33
+# ╠═c17e8693-ea60-4388-848a-b208ac250690
+# ╟─79a8e531-6c29-4cf5-8429-0d7474b01f29
+# ╟─a1afe50c-3d5c-4c50-99dd-73aef979e24a
+# ╟─3794e224-9bba-481d-b072-4abde652c627
+# ╟─55cee522-7a7d-409e-bcee-5dd6f41c701f
+# ╟─6a914ea6-349a-43b9-8152-6e4452786646
+# ╟─a039ce76-e5e8-4d22-a23c-c1d03849ada3
+# ╟─8b7f2e1c-d21d-4d51-83cc-6a118c34586d
+# ╟─8f64ebad-d946-4f90-bbad-c2923fad1c65
+# ╟─77b4d504-7eab-49e8-ab5e-b576250c5411
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
