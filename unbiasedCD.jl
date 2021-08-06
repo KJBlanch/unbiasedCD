@@ -23,7 +23,17 @@ using Plots # For plotting
 PlutoUI.TableOfContents(depth = 6)
 
 # ╔═╡ ef35700e-8df6-4446-b9f4-2e82bf8801c0
-html"<button onclick='present()'>present</button>"
+html"<center><button 
+	style='background-color: #4CAF50;  
+		border: None ;
+		color: white;
+		padding: 16px 32px;
+		text-align: center;
+		text-decoration: none;
+		display: inline-block;
+		font-size: 20px;
+		border-radius: 12px' 
+	onclick='present()' >Slideshow</button>"
 
 # ╔═╡ 9e830b5e-f37f-11eb-083f-277a24c3cd6c
 md"# Notebook Reimplimentation of Unbiased Contrastive Divergence
@@ -167,9 +177,10 @@ md"So we need two functions. One for infering hidden units in the positive phase
 # ╔═╡ 93ca8efa-1bc5-473c-83cc-5994af633659
 function inference_pos!(rbm, v, h)
 	# Infer the hidden units given fixed visible units
-	r = rand(Float32, size(h))
-	p = Flux.σ.(rbm.W * v .+ rbm.b)
-	h .= p .> r
+	# r = rand(Float32, size(h))
+	# p = Flux.σ.(rbm.W * v .+ rbm.b)
+	# h .= p .> r
+	h = Flux.σ.(rbm.W * v .+ rbm.b)
 	return h
 end
 
@@ -183,9 +194,10 @@ function inference_neg!(rbm, v, h, k)
 		h .= p .> r
 		# Infer visible units given the current hidden units
 		r = rand(Float32, size(v))
-		p = Flux.σ.(rbm.W' * h .+ rbm.a) # transpose W?
+		p = Flux.σ.(rbm.W' * h .+ rbm.a)
 		v .= p .> r
 	end
+	h = Flux.σ.(rbm.W * v .+ rbm.b)
 	return v, h
 end
 
@@ -315,11 +327,14 @@ md"We can now initialize an RBM with random weights and train it!."
 begin
 	println("\nTraining RBM") # printed to console!
 	rbm = init_rbm(numvisible=784, numhidden=64)
-	recloss = train(rbm, numepochs=5, batchsize=64, k=2);
+	recloss = train(rbm, numepochs=5, batchsize=64, k=3);
 end
 
 # ╔═╡ 711787c1-f8fc-4fac-92c2-21a01ab4937d
 md"## Visualizing the filters"
+
+# ╔═╡ 09852337-608d-4ef4-819d-74437bf978bc
+md"Here we visualize the first 64 filters."
 
 # ╔═╡ 6cc91180-c85f-4e46-93bb-668234023328
 filters = [imshow(rbm.W'[:,i]) for i=1:64];
@@ -419,8 +434,152 @@ The CD-k approach truncates the Markov chain at k iterations, which results in a
 # ╔═╡ 8f64ebad-d946-4f90-bbad-c2923fad1c65
 md"## How to get the chain \{$\eta_t\}$"
 
+# ╔═╡ c05d48e3-4b20-4c52-a437-b376ed8c5756
+md"The authors state that the second term can be expressed as a telescoping sum under some mild conditions (TODO: check this in the påaper's appendix)."
+
+# ╔═╡ 2588712f-6a5e-4fd1-9b2c-b6c7a20e9199
+md"
+```math
+	\begin{equation}
+		\mathbb{E}_\mathcal{M}\{f(\pmb{x})\} 
+		= \mathbb{E}\{f(\pmb{\xi}_k)\} 
+		+ \sum_{t=k+1}^\infty 
+		\left[
+		\mathbb{E}\{f(\pmb{\xi}_t)\}
+		- \mathbb{E}\{f(\pmb{\xi}_{t-1})\}
+		\right]
+	\end{equation}
+```
+"
+
+# ╔═╡ 928fd624-c571-43f4-8bf7-346ec51deeb9
+md"They then assume that for any $k\geq 0$ there exists another Markov chain $\{\eta_t\}$, ulfilling the following conditions: \{\eta_t\} and \{\xi_t\} follow the same marginal distribution and $\xi_t=\eta_{t-1}$ for all $t\geq\tau$ for some random time $\tau$. They then flip the order of summation and expectation which yields the followingresult (TODO: check appendix in the paper for detailed derivations)."
+
+# ╔═╡ db748b83-87d9-4354-9a74-b15424119d64
+md"
+```math
+	\begin{equation}
+		\mathbb{E}_\mathcal{M}\{f(\pmb{x})\} 
+		= \mathbb{E}\left[
+		f(\xi_k)
+		+ \sum_{t=k+1}^\infty \{f(\xi_t) - f(\eta_{t-1})\}
+		\right]		
+		= \mathbb{E}\left[
+		f(\xi_k)
+		+ \sum_{t=k+1}^{\tau - 1} \{f(\xi_t) - f(\eta_{t-1})\}
+		\right]
+	\end{equation}
+```
+"
+
+# ╔═╡ c8c8c68a-826e-4877-88a5-59866f422d40
+md"In the paper they note that one is free to choose k as one pleases, but that they chose k=1."
+
 # ╔═╡ 77b4d504-7eab-49e8-ab5e-b576250c5411
-md" ## RBM implementation"
+md" ## UCD RBM implementation"
+
+# ╔═╡ 243c9723-6e33-4e02-baaa-857d4f4cd344
+md"- **Note**: Qiu et al used 1000 parallel Markov chains in their experiments in order to get a better gradient estimate. This makes sense, but might not be necessary for a proof of concept implementation."
+
+# ╔═╡ e673d1c9-08fd-46be-8164-d0cf96052e8c
+md"
+### TODOs: 
+- how to deal with the density functions?
+- Get a grip of the algorithm outline.
+- divide it into sub-functions.
+"
+
+# ╔═╡ 096d47a3-638e-4906-a5dd-b5185f3d7b70
+#function ∇UCD()
+	# Term 1
+	# Just get the activations with a forward pass like in CD.k
+	
+	# term 2
+	# Like the paper we set k=1, so run CD-1 to get f(ξ₁)
+	# then compute f(ϵ_t) and f(η_{t-1}) using the coupling scheme
+	
+	# Compute the gradient using the found neuron activations
+	
+	# return gradients
+#end
+
+# ╔═╡ c0944ff3-c13a-484d-90ed-8d29bb52bd31
+function trainUCD(rbm; numepochs=5, batchsize=64, k=3)
+
+	trainloader, testloader = FMNISTdataloader(batchsize)
+	# Choose optimizer
+	η = 0.05; optimizer = Descent(η) # SGD
+	# η = 0.02; optimizer = Momentum(η)
+	# η = 0.0003; optimizer = ADAM(η)
+	
+	# We use Zygotes graddict in order to use Flux's optimizers
+	θ = Flux.params(rbm.W, rbm.a, rbm.b)
+    ∇θ = Zygote.Grads(IdDict(), θ)
+	
+	recloss = zeros(Float32, numepochs)
+	
+	# Arrays for storing the variables
+	numvisible, numhidden = length(rbm.a), length(rbm.b)
+	hpos = zeros(Float32, (numhidden, batchsize))
+	vpos = zeros(Float32, (numvisible, batchsize))
+	hξₖ = zeros(Float32, (numhidden, batchsize))
+	vξₖ = zeros(Float32, (numvisible, batchsize))
+	hξₜ = zeros(Float32, (numhidden, batchsize))
+	vξₜ = zeros(Float32, (numvisible, batchsize))
+	hηₜ₋₁ = zeros(Float32, (numhidden, batchsize))
+	vηₜ₋₁ = zeros(Float32, (numvisible, batchsize))
+	
+	for epoch=1:numepochs
+		t1 = time()
+		for (x,y) in trainloader
+			# The activations for the first term are easy to compute
+			vpos = x
+			hpos = inference_pos!(rbm, vpos, hpos)
+
+			#= The activations for the second term arer more difficult
+			There are three parts:
+			(1) The ξₖ term, which we typycally fix to use k=1. 
+			We find this by running CD-1.
+			(2) The ξₜ term and (3) the ηₜ₋₁ term, which really are the tricky parts 
+			=#
+			
+			# (1) get ξₖ term via CD-k
+			vξₖ = deepcopy(vpos)
+			vξₖ, hneg = inference_neg!(rbm, vξₖ, hξₖ, k)
+			
+			# (2) get ξₜ term and (3) the ηₜ₋₁
+			# vξₜ, vηₜ₋₁ = inference_UCD
+			# hξₜ = Flux.σ.(rbm.W * vξₜ .+ rbm.b)
+			# hηₜ₋₁ = Flux.σ.(rbm.W * vηₜ₋₁ .+ rbm.b)
+			
+			# Compute gradient terms
+			# ∇pos = ∇E(vpos, hpos, batchsize)
+			# ∇neg = ∇E(vneg, hneg, batchsize)
+			# for i=1:3
+			# ∇θ.grads[θ[i]] = -∇pos[i] + ∇neg[i]
+			# end
+			#Flux.Optimise.update!(optimizer, θ, ∇θ)
+
+		end
+		
+		recloss[epoch] = reconstruction_loss(rbm , testloader.data[1])
+		t2 = time()
+		# println output printed to console
+		println("Epoch: ", epoch, "/", numepochs, 
+				":\t recloss = ", round(recloss[epoch], digits=5),
+				"\t runtime: ", round(t2-t1, digits=2), " s")
+
+	end
+	return recloss
+end
+
+# ╔═╡ 431a65ad-152f-4686-bfe1-cf856056dffd
+# Initialize the network
+begin
+	println("\nTraining RBM") # printed to console!
+	rbmUCD = init_rbm(numvisible=784, numhidden=64)
+	reclossUCD = trainUCD(rbm, numepochs=1, batchsize=64, k=1);
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1642,6 +1801,7 @@ version = "0.9.1+5"
 # ╟─5690fc6d-d3b4-478c-8efe-cd2c03a915af
 # ╠═944f0cf9-8302-41f4-9b9d-f90523827bac
 # ╟─711787c1-f8fc-4fac-92c2-21a01ab4937d
+# ╟─09852337-608d-4ef4-819d-74437bf978bc
 # ╠═6cc91180-c85f-4e46-93bb-668234023328
 # ╠═f0c0bf3b-3329-4619-ba86-366b7abe3c79
 # ╟─0ca12440-3025-48ff-9aa7-aed2ed01d9f6
@@ -1660,6 +1820,16 @@ version = "0.9.1+5"
 # ╟─a039ce76-e5e8-4d22-a23c-c1d03849ada3
 # ╟─8b7f2e1c-d21d-4d51-83cc-6a118c34586d
 # ╟─8f64ebad-d946-4f90-bbad-c2923fad1c65
+# ╟─c05d48e3-4b20-4c52-a437-b376ed8c5756
+# ╟─2588712f-6a5e-4fd1-9b2c-b6c7a20e9199
+# ╟─928fd624-c571-43f4-8bf7-346ec51deeb9
+# ╟─db748b83-87d9-4354-9a74-b15424119d64
+# ╟─c8c8c68a-826e-4877-88a5-59866f422d40
 # ╟─77b4d504-7eab-49e8-ab5e-b576250c5411
+# ╟─243c9723-6e33-4e02-baaa-857d4f4cd344
+# ╠═e673d1c9-08fd-46be-8164-d0cf96052e8c
+# ╠═096d47a3-638e-4906-a5dd-b5185f3d7b70
+# ╠═c0944ff3-c13a-484d-90ed-8d29bb52bd31
+# ╠═431a65ad-152f-4686-bfe1-cf856056dffd
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
