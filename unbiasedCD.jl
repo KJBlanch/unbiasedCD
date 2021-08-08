@@ -143,7 +143,7 @@ function ∇E(v,h, batchsize)
 	∂E∂W = h*v'/batchsize
 	∂E∂a = sum(v, dims=2)[:]/batchsize
 	∂E∂b = sum(h, dims=2)[:]/batchsize
-	return ∂E∂W, ∂E∂a, ∂E∂b
+	return [∂E∂W, ∂E∂a, ∂E∂b]
 end
 
 # ╔═╡ 282f9d60-8d8a-40dd-b077-4afe3b3d6313
@@ -572,23 +572,34 @@ function trainUCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries)
 			#= The activations for the second term arer more difficult
 			There are three parts:
 			(1) The ξₖ term, which we typycally fix to use k=1. 
-			We find this by running CD-1.
-			(2) The ξₜ term and (3) the ηₜ₋₁ term, which really are the tricky parts 
+			We find this by running CD-K.
+			(2) The ξₜ terms and (3) the ηₜ₋₁ terms, which really are the tricky parts 
 			=#
 			
 			# (1) get ξₖ term via CD-k
 			vξₖ = deepcopy(vpos)
 			vξₖ, hξₖ = inference_neg!(rbm, vξₖ, hξₖ, k)
 			
-			# (2) get ξₜ term and (3) the ηₜ₋₁ term
+			∇combined = -∇E(vpos, hpos, batchsize) .+ ∇E(vξₖ, hξₖ, batchsize)
+			# ∇pos = -∇E(vpos, hpos, batchsize)
+			# ∇neg1 = ∇E(vξₖ, hξₖ, batchsize)	
+			# ∇combined = [-∇pos[i] + ∇neg1[i] for i=1:3]
+			
+			# (2) get ξₜ terms and (3) the ηₜ₋₁ terms
 			# Is this an appropriate initialization of vξₜ, vηₜ₋₁?
 			vξₜ, vηₜ₋₁ = deepcopy(vξₖ), deepcopy(vξₖ) 
 			
 			for t=1:tmax
 				vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁ = coupled_inference(vξₖ, hξₖ, vηₜ₋₁, hηₜ₋₁, 															   vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁,															   maxtries,)
 				# Check if the chains have met
-				if vξₖ==vηₜ₋₁ && hξₖ==hηₜ₋₁
+				if vξₜ==vηₜ₋₁ && hξₜ==hηₜ₋₁
 					break
+				else
+					#= Add contributions to the gradient estimate
+					if the chain has not converged yet. =#
+					∇ηₜ₋₁ = -∇E(vηₜ₋₁, hηₜ₋₁, batchsize) 
+					∇ξₜ = ∇E(vξₜ, hξₜ, batchsize)
+					∇combined .+= -∇ηₜ₋₁ .+ ∇ξₜ #∇E(vηₜ₋₁, hηₜ₋₁, batchsize) .+ ∇E(vξₜ, hξₜ, batchsize) 
 				end		
 			end
 			
@@ -596,12 +607,10 @@ function trainUCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries)
 			hηₜ₋₁ = Flux.σ.(rbm.W * vηₜ₋₁ .+ rbm.b)
 			
 			# Compute gradient terms
-			# ∇pos = ∇E(vpos, hpos, batchsize)
-			# ∇neg = ∇E(vneg, hneg, batchsize)
-			# for i=1:3
-			# ∇θ.grads[θ[i]] = -∇pos[i] + ∇neg[i]
-			# end
-			#Flux.Optimise.update!(optimizer, θ, ∇θ)
+			for i=1:3
+				∇θ.grads[θ[i]] = ∇combined[i]
+			end
+			Flux.Optimise.update!(optimizer, θ, ∇θ)
 
 		end
 		
@@ -621,8 +630,29 @@ end
 begin
 	println("\nTraining RBM") # printed to console!
 	rbmUCD = init_rbm(numvisible=784, numhidden=64)
-	reclossUCD = trainUCD(rbm, numepochs=1, batchsize=64, k=1, tmax=3, maxtries=2);
+	reclossUCD = trainUCD(rbmUCD, numepochs=5, batchsize=64, k=3, tmax=100, maxtries=10);
 end
+
+# ╔═╡ e24aa7ea-211b-4f15-bc17-359478b02cb7
+filtersUCD = [imshow(rbmUCD.W'[:,i]) for i=1:64];
+
+# ╔═╡ e37a45e6-9c4a-4492-a774-4c57637ced6b
+plot(filtersUCD..., layout=(8, 8), size=(2000, 2000))
+
+# ╔═╡ 8b5722e3-5a16-4806-b859-6cacb9ee5e13
+xUCD, xrecUCD = reconstruct(rbmUCD, 64);
+
+# ╔═╡ 5cf76965-fabe-4a2e-beab-6abf3a216e90
+img_origUCD = [imshow(xUCD[:,i]) for i=1:64];
+
+# ╔═╡ 2ffe34c6-b9a6-44b4-94ed-844d6604efe1
+img_recUCD = [imshow(xrecUCD[:,i]) for i=1:64];
+
+# ╔═╡ 403eb3b1-796c-4a8f-b75f-c35f226e7375
+plot(img_origUCD..., layout=(8, 8), size=(1200, 1200))
+
+# ╔═╡ 78fca72f-e3a7-4b06-85df-eb54358643ec
+plot(img_recUCD..., layout=(8, 8), size=(1200, 1200))
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1873,5 +1903,12 @@ version = "0.9.1+5"
 # ╠═0593e773-d877-4c8c-ae7f-826cad5cf75a
 # ╠═c0944ff3-c13a-484d-90ed-8d29bb52bd31
 # ╠═431a65ad-152f-4686-bfe1-cf856056dffd
+# ╠═e24aa7ea-211b-4f15-bc17-359478b02cb7
+# ╠═e37a45e6-9c4a-4492-a774-4c57637ced6b
+# ╠═8b5722e3-5a16-4806-b859-6cacb9ee5e13
+# ╠═5cf76965-fabe-4a2e-beab-6abf3a216e90
+# ╠═2ffe34c6-b9a6-44b4-94ed-844d6604efe1
+# ╠═403eb3b1-796c-4a8f-b75f-c35f226e7375
+# ╠═78fca72f-e3a7-4b06-85df-eb54358643ec
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
