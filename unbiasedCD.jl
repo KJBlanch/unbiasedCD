@@ -378,9 +378,6 @@ plot(img_orig..., layout=(8, 8), size=(1200, 1200))
 # ╔═╡ 8799394c-cec1-4555-b4cb-1c4e7f386a33
 plot(img_rec..., layout=(8, 8), size=(1200, 1200))
 
-# ╔═╡ c17e8693-ea60-4388-848a-b208ac250690
-
-
 # ╔═╡ 79a8e531-6c29-4cf5-8429-0d7474b01f29
 md"# How to train an RBM with UCD
 "
@@ -481,30 +478,66 @@ md" ## UCD RBM implementation"
 # ╔═╡ 243c9723-6e33-4e02-baaa-857d4f4cd344
 md"- **Note**: Qiu et al used 1000 parallel Markov chains in their experiments in order to get a better gradient estimate. This makes sense, but might not be necessary for a proof of concept implementation."
 
-# ╔═╡ e673d1c9-08fd-46be-8164-d0cf96052e8c
-md"
-### TODOs: 
-- how to deal with the density functions?
-- Get a grip of the algorithm outline.
-- divide it into sub-functions.
-"
+# ╔═╡ e97a9dde-5e0f-48ae-a72d-56cea3410ad9
+function transition_density(pv, v)
+	lnT = sum(log.(pv).*v .+ log.(1 .- pv).*(1 .- v))
+	return lnT
+end
 
-# ╔═╡ 096d47a3-638e-4906-a5dd-b5185f3d7b70
-#function ∇UCD()
-	# Term 1
-	# Just get the activations with a forward pass like in CD.k
+# ╔═╡ 0593e773-d877-4c8c-ae7f-826cad5cf75a
+function coupled_inference(vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, # Input variables
+						   vₜ₊₁, hₜ₊₁, vₜ´, hₜ´, # Output variables
+						   maxtries)
+	# Following algorithm 3 in UCD paper
+	# Input: ϵₜ = (vₜ, hₜ) and ηₜ₋₁ = (vₜ₋₁´, hₜ₋₁´)
+	# Output: ϵₜ₊₁ = (vₜ₊₁, hₜ₊₁) and ηₜ = (vₜ´, hₜ´)
 	
-	# term 2
-	# Like the paper we set k=1, so run CD-1 to get f(ξ₁)
-	# then compute f(ϵ_t) and f(η_{t-1}) using the coupling scheme
+	U1 = rand(); Z1 = rand(Float32, size(vₜ)[1])
+	p_vₜ₊₁ = Flux.σ.(rbm.W' * hₜ .+ rbm.a)
+	vₜ₊₁ = p_vₜ₊₁ .>= Z1
+	p_vₜ´ = Flux.σ.(rbm.W' * hₜ .+ rbm.a)
+	p_vₜ₋₁´ = Flux.σ.(rbm.W' * hₜ₋₁´ .+ rbm.a)
+
+	lnT1 = transition_density(p_vₜ´, vₜ₊₁)
+	lnT2 = transition_density(p_vₜ₊₁, vₜ₊₁)
 	
-	# Compute the gradient using the found neuron activations
+	# Check if chains meet up
+	if U1 <= exp(lnT1 - lnT2)
+		vₜ´ = vₜ₊₁
+	# Otherwise repeatedly sample
+	else
+		accept_vₜ₊₁ = false
+		accept_vₜ´ = false
+		for i=1:maxtries
+			U2 = rand(); U2´ = rand(); Z2 = rand(Float32, size(vₜ)[1])
+			# Propose vₜ₊₁
+			if accept_vₜ₊₁ == false
+				vₜ₊₁ .= p_vₜ₊₁ .>= Z2
+				T1 = transition_density(p_vₜ₊₁, vₜ₊₁)
+				T2 = transition_density(p_vₜ´, vₜ₊₁)
+				accept_vₜ₊₁ = U2 > exp(T1 - T2)
+			end
+			# Propose vₜ´
+			if accept_vₜ´ == false
+				vₜ .= p_vₜ´ .>= Z2
+				T1 = transition_density(p_vₜ´, vₜ´)
+				T2 = transition_density(p_vₜ₋₁´, vₜ´)
+				accept_vₜ´ = U2´ > exp(T1 - T2)
+			end
+		end # end sampling
+	end
+	# println("=================")
+	Z3 = rand(Float32, size(hₜ)[1])
+	# println(size(hₜ₊₁))
+	hₜ₊₁ .= (Flux.σ.(rbm.W * vₜ₊₁ .+ rbm.b) .>= Z3)
+	# println(size(hₜ₊₁))
+	hₜ´ .= (Flux.σ.(rbm.W * vₜ´.+ rbm.b) .>= Z3)
 	
-	# return gradients
-#end
+	return vₜ₊₁, hₜ₊₁, vₜ´, hₜ´
+end
 
 # ╔═╡ c0944ff3-c13a-484d-90ed-8d29bb52bd31
-function trainUCD(rbm; numepochs=5, batchsize=64, k=3)
+function trainUCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries)
 
 	trainloader, testloader = FMNISTdataloader(batchsize)
 	# Choose optimizer
@@ -545,12 +578,22 @@ function trainUCD(rbm; numepochs=5, batchsize=64, k=3)
 			
 			# (1) get ξₖ term via CD-k
 			vξₖ = deepcopy(vpos)
-			vξₖ, hneg = inference_neg!(rbm, vξₖ, hξₖ, k)
+			vξₖ, hξₖ = inference_neg!(rbm, vξₖ, hξₖ, k)
 			
-			# (2) get ξₜ term and (3) the ηₜ₋₁
-			# vξₜ, vηₜ₋₁ = inference_UCD
-			# hξₜ = Flux.σ.(rbm.W * vξₜ .+ rbm.b)
-			# hηₜ₋₁ = Flux.σ.(rbm.W * vηₜ₋₁ .+ rbm.b)
+			# (2) get ξₜ term and (3) the ηₜ₋₁ term
+			# Is this an appropriate initialization of vξₜ, vηₜ₋₁?
+			vξₜ, vηₜ₋₁ = deepcopy(vξₖ), deepcopy(vξₖ) 
+			
+			for t=1:tmax
+				vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁ = coupled_inference(vξₖ, hξₖ, vηₜ₋₁, hηₜ₋₁, 															   vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁,															   maxtries,)
+				# Check if the chains have met
+				if vξₖ==vηₜ₋₁ && hξₖ==hηₜ₋₁
+					break
+				end		
+			end
+			
+			hξₜ = Flux.σ.(rbm.W * vξₜ .+ rbm.b)
+			hηₜ₋₁ = Flux.σ.(rbm.W * vηₜ₋₁ .+ rbm.b)
 			
 			# Compute gradient terms
 			# ∇pos = ∇E(vpos, hpos, batchsize)
@@ -578,7 +621,7 @@ end
 begin
 	println("\nTraining RBM") # printed to console!
 	rbmUCD = init_rbm(numvisible=784, numhidden=64)
-	reclossUCD = trainUCD(rbm, numepochs=1, batchsize=64, k=1);
+	reclossUCD = trainUCD(rbm, numepochs=1, batchsize=64, k=1, tmax=3, maxtries=2);
 end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
@@ -593,9 +636,9 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 [compat]
 Flux = "~0.12.6"
 MLDatasets = "~0.5.9"
-Plots = "~1.19.4"
+Plots = "~1.20.0"
 PlutoUI = "~0.7.9"
-Zygote = "~0.6.17"
+Zygote = "~0.6.19"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -695,15 +738,15 @@ version = "1.16.0+6"
 
 [[ChainRules]]
 deps = ["ChainRulesCore", "Compat", "LinearAlgebra", "Random", "Statistics"]
-git-tree-sha1 = "0902fc7f416c8f1e3b1e014786bb65d0c2241a9b"
+git-tree-sha1 = "11567f2471013449c2fcf119f674c681484a130e"
 uuid = "082447d4-558c-5d27-93f4-14fc19e9eca2"
-version = "0.8.24"
+version = "1.5.1"
 
 [[ChainRulesCore]]
 deps = ["Compat", "LinearAlgebra", "SparseArrays"]
-git-tree-sha1 = "f53ca8d41e4753c41cdafa6ec5f7ce914b34be54"
+git-tree-sha1 = "bdc0937269321858ab2a4f288486cb258b9a0af7"
 uuid = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
-version = "0.10.13"
+version = "1.3.0"
 
 [[CodecZlib]]
 deps = ["TranscodingStreams", "Zlib_jll"]
@@ -909,22 +952,22 @@ uuid = "0c68f7d7-f131-5f86-a1c3-88cf8149b2d7"
 version = "7.0.1"
 
 [[GPUCompiler]]
-deps = ["DataStructures", "ExprTools", "InteractiveUtils", "LLVM", "Libdl", "Logging", "TimerOutputs", "UUIDs"]
-git-tree-sha1 = "0da0f52fc521ff23b8291e7fda54c61907609f12"
+deps = ["ExprTools", "InteractiveUtils", "LLVM", "Libdl", "Logging", "TimerOutputs", "UUIDs"]
+git-tree-sha1 = "f26f15d9c353f7091065390ea826df9e03917e58"
 uuid = "61eb1bfa-7361-4325-ad38-22787b887f55"
-version = "0.12.6"
+version = "0.12.8"
 
 [[GR]]
 deps = ["Base64", "DelimitedFiles", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Pkg", "Printf", "Random", "Serialization", "Sockets", "Test", "UUIDs"]
-git-tree-sha1 = "9f473cdf6e2eb360c576f9822e7c765dd9d26dbc"
+git-tree-sha1 = "182da592436e287758ded5be6e32c406de3a2e47"
 uuid = "28b8d3ca-fb5f-59d9-8090-bfdbd6d07a71"
-version = "0.58.0"
+version = "0.58.1"
 
 [[GR_jll]]
 deps = ["Artifacts", "Bzip2_jll", "Cairo_jll", "FFMPEG_jll", "Fontconfig_jll", "GLFW_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Pixman_jll", "Pkg", "Qt5Base_jll", "Zlib_jll", "libpng_jll"]
-git-tree-sha1 = "eaf96e05a880f3db5ded5a5a8a7817ecba3c7392"
+git-tree-sha1 = "d59e8320c2747553788e4fc42231489cc602fa50"
 uuid = "d2c73de3-f751-5644-a686-071e5b155ba9"
-version = "0.58.0+0"
+version = "0.58.1+0"
 
 [[GZip]]
 deps = ["Libdl"]
@@ -1012,9 +1055,9 @@ version = "1.3.0"
 
 [[JSON]]
 deps = ["Dates", "Mmap", "Parsers", "Unicode"]
-git-tree-sha1 = "81690084b6198a2e1da36fcfda16eeca9f9f24e4"
+git-tree-sha1 = "8076680b162ada2a031f707ac7b4953e30667a37"
 uuid = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
-version = "0.21.1"
+version = "0.21.2"
 
 [[JpegTurbo_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1036,15 +1079,15 @@ version = "3.100.1+0"
 
 [[LLVM]]
 deps = ["CEnum", "LLVMExtra_jll", "Libdl", "Printf", "Unicode"]
-git-tree-sha1 = "733abcbdc67337bb6aaf873c6bebbe1e6440a5df"
+git-tree-sha1 = "d6041ad706cf458b2c9f3e501152488a26451e9c"
 uuid = "929cbde3-209d-540e-8aea-75f648917ca0"
-version = "4.1.1"
+version = "4.2.0"
 
 [[LLVMExtra_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "b36c0677a0549c7d1dc8719899a4133abbfacf7d"
+git-tree-sha1 = "a9b1130c4728b0e462a1c28772954650039eb847"
 uuid = "dad2f222-ce93-54a1-a47d-0025e8a3acab"
-version = "0.0.6+0"
+version = "0.0.7+0"
 
 [[LZO_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1173,9 +1216,9 @@ version = "0.5.9"
 
 [[MacroTools]]
 deps = ["Markdown", "Random"]
-git-tree-sha1 = "6a8a2a625ab0dea913aba95c11370589e0239ff0"
+git-tree-sha1 = "0fb723cd8c45858c22169b2e42269e53271a6df7"
 uuid = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
-version = "0.5.6"
+version = "0.5.7"
 
 [[Markdown]]
 deps = ["Base64"]
@@ -1216,9 +1259,9 @@ uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
 
 [[NNlib]]
 deps = ["Adapt", "ChainRulesCore", "Compat", "LinearAlgebra", "Pkg", "Requires", "Statistics"]
-git-tree-sha1 = "d27c8947dab6e3a315f6dcd4d2493ed3ba541791"
+git-tree-sha1 = "16520143f067928bb69eee59ac8bca06be1e43b8"
 uuid = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
-version = "0.7.26"
+version = "0.7.27"
 
 [[NNlibCUDA]]
 deps = ["CUDA", "LinearAlgebra", "NNlib", "Random", "Statistics"]
@@ -1271,9 +1314,9 @@ version = "8.44.0+0"
 
 [[Parsers]]
 deps = ["Dates"]
-git-tree-sha1 = "94bf17e83a0e4b20c8d77f6af8ffe8cc3b386c0a"
+git-tree-sha1 = "477bf42b4d1496b454c10cce46645bb5b8a0cf2c"
 uuid = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
-version = "1.1.1"
+version = "2.0.2"
 
 [[Pixman_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1299,9 +1342,9 @@ version = "1.0.11"
 
 [[Plots]]
 deps = ["Base64", "Contour", "Dates", "FFMPEG", "FixedPointNumbers", "GR", "GeometryBasics", "JSON", "Latexify", "LinearAlgebra", "Measures", "NaNMath", "PlotThemes", "PlotUtils", "Printf", "REPL", "Random", "RecipesBase", "RecipesPipeline", "Reexport", "Requires", "Scratch", "Showoff", "SparseArrays", "Statistics", "StatsBase", "UUIDs"]
-git-tree-sha1 = "1e72752052a3893d0f7103fbac728b60b934f5a5"
+git-tree-sha1 = "e39bea10478c6aff5495ab522517fae5134b40e3"
 uuid = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
-version = "1.19.4"
+version = "1.20.0"
 
 [[PlutoUI]]
 deps = ["Base64", "Dates", "InteractiveUtils", "JSON", "Logging", "Markdown", "Random", "Reexport", "Suppressor"]
@@ -1351,9 +1394,9 @@ version = "1.4.2"
 
 [[RandomNumbers]]
 deps = ["Random", "Requires"]
-git-tree-sha1 = "a752043df7488ca8bcbe05fa82c831b5e2c67211"
+git-tree-sha1 = "043da614cc7e95c703498a491e2c21f58a2b8111"
 uuid = "e6cf234a-135c-5ec9-84dd-332b85af5143"
-version = "1.5.2"
+version = "1.5.3"
 
 [[RecipesBase]]
 git-tree-sha1 = "b3fb709f3c97bfc6e948be68beeecb55a0b340ae"
@@ -1426,9 +1469,9 @@ version = "0.3.0"
 
 [[StaticArrays]]
 deps = ["LinearAlgebra", "Random", "Statistics"]
-git-tree-sha1 = "885838778bb6f0136f8317757d7803e0d81201e4"
+git-tree-sha1 = "3fedeffc02e47d6e3eb479150c8e5cd8f15a77a0"
 uuid = "90137ffa-7385-5640-81b9-e52037218182"
-version = "1.2.9"
+version = "1.2.10"
 
 [[Statistics]]
 deps = ["LinearAlgebra", "SparseArrays"]
@@ -1683,9 +1726,9 @@ version = "1.5.0+0"
 
 [[Zygote]]
 deps = ["AbstractFFTs", "ChainRules", "ChainRulesCore", "DiffRules", "Distributed", "FillArrays", "ForwardDiff", "IRTools", "InteractiveUtils", "LinearAlgebra", "MacroTools", "NaNMath", "Random", "Requires", "SpecialFunctions", "Statistics", "ZygoteRules"]
-git-tree-sha1 = "8b634fdb4c3c63f2ceaa2559a008da4f405af6b3"
+git-tree-sha1 = "f01bac579bb397ab138aed7e9e3f80ef76d055f7"
 uuid = "e88e6eb3-aa80-5325-afca-941959d7151f"
-version = "0.6.17"
+version = "0.6.19"
 
 [[ZygoteRules]]
 deps = ["MacroTools"]
@@ -1811,7 +1854,6 @@ version = "0.9.1+5"
 # ╠═004f1d73-b909-47da-b25d-aa83787520e9
 # ╠═b2046d69-f61a-4c47-8277-f8d5029035ac
 # ╠═8799394c-cec1-4555-b4cb-1c4e7f386a33
-# ╠═c17e8693-ea60-4388-848a-b208ac250690
 # ╟─79a8e531-6c29-4cf5-8429-0d7474b01f29
 # ╟─a1afe50c-3d5c-4c50-99dd-73aef979e24a
 # ╟─3794e224-9bba-481d-b072-4abde652c627
@@ -1827,8 +1869,8 @@ version = "0.9.1+5"
 # ╟─c8c8c68a-826e-4877-88a5-59866f422d40
 # ╟─77b4d504-7eab-49e8-ab5e-b576250c5411
 # ╟─243c9723-6e33-4e02-baaa-857d4f4cd344
-# ╠═e673d1c9-08fd-46be-8164-d0cf96052e8c
-# ╠═096d47a3-638e-4906-a5dd-b5185f3d7b70
+# ╠═e97a9dde-5e0f-48ae-a72d-56cea3410ad9
+# ╠═0593e773-d877-4c8c-ae7f-826cad5cf75a
 # ╠═c0944ff3-c13a-484d-90ed-8d29bb52bd31
 # ╠═431a65ad-152f-4686-bfe1-cf856056dffd
 # ╟─00000000-0000-0000-0000-000000000001
