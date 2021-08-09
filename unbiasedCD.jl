@@ -4,6 +4,15 @@
 using Markdown
 using InteractiveUtils
 
+# This Pluto notebook uses @bind for interactivity. When running this notebook outside of Pluto, the following 'mock version' of @bind gives bound variables a default value (instead of an error).
+macro bind(def, element)
+    quote
+        local el = $(esc(element))
+        global $(esc(def)) = Core.applicable(Base.get, el) ? Base.get(el) : missing
+        el
+    end
+end
+
 # ╔═╡ 03fcb360-421d-441a-bd8c-5372d6bb2be5
 using PlutoUI # To enable table of contents
 
@@ -231,8 +240,8 @@ end
 md"We will use the FMNISTloader function to load the FMNIST data set. Let's have a look at what this dataset looks like! The images are stored as columns in a matrix, so the function will take a vector as input and than reshape and rotate."
 
 # ╔═╡ 31a4f5c7-9d7b-47a8-a27a-3a421fc0f10f
-function imshow(imgvec) 
-	heatmap(rotr90(reshape(imgvec, (28,28)), 3), c=:grays, colorbar=false, xticks=false, yticks=false, border=:none, aspect_ratio=:equal, size=(100,100))
+function imshow(imgvec; w=28, h=28) 
+	heatmap(rotr90(reshape(imgvec, (w, h)), 3), c=:grays, colorbar=false, xticks=false, yticks=false, border=:none, aspect_ratio=:equal, size=(100,100))
 end
 
 # ╔═╡ 7906a124-67ea-42ae-8f27-80eaba3e3368
@@ -485,7 +494,7 @@ function transition_density(pv, v)
 end
 
 # ╔═╡ 0593e773-d877-4c8c-ae7f-826cad5cf75a
-function coupled_inference(vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, # Input variables
+function coupled_inference(rbm, vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, # Input variables
 						   vₜ₊₁, hₜ₊₁, vₜ´, hₜ´, # Output variables
 						   maxtries)
 	# Following algorithm 3 in UCD paper
@@ -526,11 +535,9 @@ function coupled_inference(vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, # Input varia
 			end
 		end # end sampling
 	end
-	# println("=================")
+	
 	Z3 = rand(Float32, size(hₜ)[1])
-	# println(size(hₜ₊₁))
 	hₜ₊₁ .= (Flux.σ.(rbm.W * vₜ₊₁ .+ rbm.b) .>= Z3)
-	# println(size(hₜ₊₁))
 	hₜ´ .= (Flux.σ.(rbm.W * vₜ´.+ rbm.b) .>= Z3)
 	
 	return vₜ₊₁, hₜ₊₁, vₜ´, hₜ´
@@ -633,26 +640,179 @@ begin
 	reclossUCD = trainUCD(rbmUCD, numepochs=5, batchsize=64, k=3, tmax=100, maxtries=10);
 end
 
-# ╔═╡ e24aa7ea-211b-4f15-bc17-359478b02cb7
-filtersUCD = [imshow(rbmUCD.W'[:,i]) for i=1:64];
+# ╔═╡ 643f9028-1f95-4c0c-b842-7cdbb1603914
+md"### Visualize the UCD trained RBM's filters and reconstructions
+For fun we use sliders to select how many filters and datapoints to visualize.
+"
 
-# ╔═╡ e37a45e6-9c4a-4492-a774-4c57637ced6b
-plot(filtersUCD..., layout=(8, 8), size=(2000, 2000))
+# ╔═╡ d8152e9d-0846-4f20-9242-3f27d80f3243
+@bind numfilters Slider(1:64; default=8, show_value=true)
+
+# ╔═╡ e675cc20-01b0-44eb-8307-5f12fa8e47d3
+md" $(numfilters) filter(s) selected!"
+
+# ╔═╡ e24aa7ea-211b-4f15-bc17-359478b02cb7
+filtersUCD = [imshow(rbmUCD.W'[:,i]) for i=1:numfilters]
+
+# ╔═╡ 248e57a5-a446-4489-8ef6-a840f08d55b9
+@bind numreconstructions Slider(1:64; default=8, show_value=true)
+
+# ╔═╡ a64f08d0-c7c6-4575-af8b-40dbdce4cf5d
+md" $(numreconstructions) datapoint(s) selected!"
 
 # ╔═╡ 8b5722e3-5a16-4806-b859-6cacb9ee5e13
-xUCD, xrecUCD = reconstruct(rbmUCD, 64);
+xUCD, xrecUCD = reconstruct(rbmUCD, numreconstructions);
 
 # ╔═╡ 5cf76965-fabe-4a2e-beab-6abf3a216e90
-img_origUCD = [imshow(xUCD[:,i]) for i=1:64];
+img_origUCD = [imshow(xUCD[:,i]) for i=1:numreconstructions]
 
-# ╔═╡ 2ffe34c6-b9a6-44b4-94ed-844d6604efe1
-img_recUCD = [imshow(xrecUCD[:,i]) for i=1:64];
+# ╔═╡ 6c96b07d-2f21-45b8-880a-28ae41da3b4b
+img_recUCD = [imshow(xrecUCD[:,i]) for i=1:numreconstructions]
 
-# ╔═╡ 403eb3b1-796c-4a8f-b75f-c35f226e7375
-plot(img_origUCD..., layout=(8, 8), size=(1200, 1200))
+# ╔═╡ 277ea081-5088-49c3-b1d9-1ac6272b6d22
+md"# Comparing UCD and CD-k"
 
-# ╔═╡ 78fca72f-e3a7-4b06-85df-eb54358643ec
-plot(img_recUCD..., layout=(8, 8), size=(1200, 1200))
+# ╔═╡ 8b8e35ba-b332-4afc-a8c5-865d73775fa9
+md"
+- Select which experiments to reproduce
+- Reproduce them 
+- Stack RBMs"
+
+# ╔═╡ 42aa9749-c4da-4aa9-a89d-c9323bf837ec
+md"Even though fMNIST is a small dataset it is still unfeasible to compute $p(\pmb{v}) = \frac{1}{Z} \sum_h e^{-E(\pmb{V}, \pmb{h})}$ for this dataset in practice, so we will work with the much smaller $4\times 4$ *Bars and Stripes* dataset."
+
+# ╔═╡ 2a7c2484-9928-4432-9450-f2823d3a75eb
+md"""## Bars and Stripes dataset
+
+The $4\times 4$ Bars and stripes dataset can be generated in a few lines of code. There are 16 possible configurations of stripes examples and the same number of bars examples. Two examples belong to both classes (bars in all/no colums is the same as stripes in all/no columns), so there are 30 unique examples in total. Qiu et al mistakenly state that the dataset contains 36 examples, but it really is 30 (or 32 if you count the duplicate samples mentioned before.
+"""
+
+# ╔═╡ d033638d-f0f6-46db-80bf-648b39a52f33
+begin
+	# Write out the possible masks and generate the bars and stripes examples.
+	mask4 = [1 1 1 1]
+	mask3 = [1 1 1 0; 1 1 0 1; 1 0 1 1; 0 1 1 1]
+	mask2 = [1 1 0 0; 0 1 1 0; 0 0 1 1; 1 0 1 0; 0 1 0 1; 1 0 0 1]
+	mask1 = [1 0 0 0; 0 1 0 0; 0 0 1 0; 0 0 0 1]
+	mask0 = [0 0 0 0]
+	mask = vcat(mask4, mask3, mask2, mask1, mask0)
+	bars = [ones(Float32, 4, 4) .* mask[i,:] for i=1:size(mask, 1)]
+	stripes = [ones(Float32, 4, 4) .* mask[i,:]' for i=1:size(mask, 1)]
+	
+	# Populate columns of BAS matrix 
+	BAS = zeros(Float32, 16, 30)
+	# With stripes examples
+	for i=1:16
+		BAS[:, i] = stripes[i][:]
+	end
+	# With bars examples, but omit degenerate cases
+	for i=1:14
+		BAS[:, 16+i] = bars[i+1][:]
+	end
+end;
+
+# ╔═╡ c2e9f61c-2316-4f45-8709-97b9268b0795
+img_BAS =  [imshow(BAS[:,i], w=4, h=4) for i=1:30]
+
+# ╔═╡ 5844b476-5827-4ba9-bd70-370326cd71ad
+# function logpv()
+	# compute z = Σᵥₕe⁻ᴱ⁽ᵛʰ⁾
+	# compute Σₕe⁻ᴱ⁽ᵛʰ⁾
+# end	
+
+# ╔═╡ 28621b42-f79c-44e8-8838-0d0717c96cee
+function train_BAS_UCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries, x)
+
+	# Choose optimizer
+	η = 0.05; optimizer = Descent(η) # SGD
+	# η = 0.02; optimizer = Momentum(η)
+	# η = 0.0003; optimizer = ADAM(η)
+	
+	# We use Zygotes graddict in order to use Flux's optimizers
+	θ = Flux.params(rbm.W, rbm.a, rbm.b)
+    ∇θ = Zygote.Grads(IdDict(), θ)
+	
+	recloss = zeros(Float32, numepochs)
+	
+	# Arrays for storing the variables
+	numvisible, numhidden = length(rbm.a), length(rbm.b)
+	hpos = zeros(Float32, (numhidden, batchsize))
+	vpos = zeros(Float32, (numvisible, batchsize))
+	hξₖ = zeros(Float32, (numhidden, batchsize))
+	vξₖ = zeros(Float32, (numvisible, batchsize))
+	hξₜ = zeros(Float32, (numhidden, batchsize))
+	vξₜ = zeros(Float32, (numvisible, batchsize))
+	hηₜ₋₁ = zeros(Float32, (numhidden, batchsize))
+	vηₜ₋₁ = zeros(Float32, (numvisible, batchsize))
+	
+	for epoch=1:numepochs
+		t1 = time()
+		# The activations for the first term are easy to compute
+		vpos = x
+		hpos = inference_pos!(rbm, vpos, hpos)
+		#= The activations for the second term arer more difficult
+		There are three parts:
+		(1) The ξₖ term, which we typycally fix to use k=1. 
+		We find this by running CD-K.
+		(2) The ξₜ terms and (3) the ηₜ₋₁ terms, which really are the tricky parts 
+		=#
+			
+		# (1) get ξₖ term via CD-k
+		vξₖ = deepcopy(vpos)
+		vξₖ, hξₖ = inference_neg!(rbm, vξₖ, hξₖ, k)
+		
+		∇combined = -∇E(vpos, hpos, batchsize) .+ ∇E(vξₖ, hξₖ, batchsize)
+		# ∇pos = -∇E(vpos, hpos, batchsize)
+		# ∇neg1 = ∇E(vξₖ, hξₖ, batchsize)	
+		# ∇combined = [-∇pos[i] + ∇neg1[i] for i=1:3]
+		
+		# (2) get ξₜ terms and (3) the ηₜ₋₁ terms
+		# Is this an appropriate initialization of vξₜ, vηₜ₋₁?
+		vξₜ, vηₜ₋₁ = deepcopy(vξₖ), deepcopy(vξₖ) 
+		
+		for t=1:tmax
+			vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁ = coupled_inference(rbm, vξₖ, hξₖ, vηₜ₋₁, hηₜ₋₁, 															   vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁,															   maxtries,)
+			# Check if the chains have met
+			if vξₜ==vηₜ₋₁ && hξₜ==hηₜ₋₁
+				break
+			else
+				#= Add contributions to the gradient estimate
+				if the chain has not converged yet. =#
+				∇ηₜ₋₁ = -∇E(vηₜ₋₁, hηₜ₋₁, batchsize) 
+				∇ξₜ = ∇E(vξₜ, hξₜ, batchsize)
+				∇combined .+= -∇ηₜ₋₁ .+ ∇ξₜ #∇E(vηₜ₋₁, hηₜ₋₁, batchsize) .+ ∇E(vξₜ, hξₜ, batchsize) 
+			end		
+		end
+			
+		hξₜ = Flux.σ.(rbm.W * vξₜ .+ rbm.b)
+		hηₜ₋₁ = Flux.σ.(rbm.W * vηₜ₋₁ .+ rbm.b)
+			
+		# Compute gradient terms
+		for i=1:3
+			∇θ.grads[θ[i]] = ∇combined[i]
+		end
+		Flux.Optimise.update!(optimizer, θ, ∇θ)
+
+		
+	recloss[epoch] = reconstruction_loss(rbm , x)
+	t2 = time()
+	# println output printed to console
+	if epoch == 0 || epoch %1000 == 0
+		println("Epoch: ", epoch, "/", numepochs, 
+				":\t recloss = ", round(recloss[epoch], digits=5),
+				"\t runtime: ", round(t2-t1, digits=2), " s")
+	end
+	end
+return recloss
+end
+
+# ╔═╡ 7dd89ba5-e84f-49a7-8047-94f420998ae3
+# Initialize the network
+begin
+	println("\nTraining RBM") # printed to console!
+	rbmBAS = init_rbm(numvisible=16, numhidden=16)
+	recloss_BAS_UCD = train_BAS_UCD(rbmBAS; numepochs=10000, batchsize=30, k=1, tmax=100, maxtries=10, x=BAS);
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1903,12 +2063,23 @@ version = "0.9.1+5"
 # ╠═0593e773-d877-4c8c-ae7f-826cad5cf75a
 # ╠═c0944ff3-c13a-484d-90ed-8d29bb52bd31
 # ╠═431a65ad-152f-4686-bfe1-cf856056dffd
+# ╟─643f9028-1f95-4c0c-b842-7cdbb1603914
+# ╟─d8152e9d-0846-4f20-9242-3f27d80f3243
+# ╟─e675cc20-01b0-44eb-8307-5f12fa8e47d3
 # ╠═e24aa7ea-211b-4f15-bc17-359478b02cb7
-# ╠═e37a45e6-9c4a-4492-a774-4c57637ced6b
+# ╟─248e57a5-a446-4489-8ef6-a840f08d55b9
+# ╟─a64f08d0-c7c6-4575-af8b-40dbdce4cf5d
 # ╠═8b5722e3-5a16-4806-b859-6cacb9ee5e13
-# ╠═5cf76965-fabe-4a2e-beab-6abf3a216e90
-# ╠═2ffe34c6-b9a6-44b4-94ed-844d6604efe1
-# ╠═403eb3b1-796c-4a8f-b75f-c35f226e7375
-# ╠═78fca72f-e3a7-4b06-85df-eb54358643ec
+# ╟─5cf76965-fabe-4a2e-beab-6abf3a216e90
+# ╠═6c96b07d-2f21-45b8-880a-28ae41da3b4b
+# ╟─277ea081-5088-49c3-b1d9-1ac6272b6d22
+# ╟─8b8e35ba-b332-4afc-a8c5-865d73775fa9
+# ╟─42aa9749-c4da-4aa9-a89d-c9323bf837ec
+# ╟─2a7c2484-9928-4432-9450-f2823d3a75eb
+# ╠═d033638d-f0f6-46db-80bf-648b39a52f33
+# ╟─c2e9f61c-2316-4f45-8709-97b9268b0795
+# ╠═5844b476-5827-4ba9-bd70-370326cd71ad
+# ╠═28621b42-f79c-44e8-8838-0d0717c96cee
+# ╠═7dd89ba5-e84f-49a7-8047-94f420998ae3
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
