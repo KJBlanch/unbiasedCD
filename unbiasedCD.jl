@@ -14,7 +14,7 @@ macro bind(def, element)
 end
 
 # ╔═╡ 03fcb360-421d-441a-bd8c-5372d6bb2be5
-using PlutoUI # To enable table of contents
+using PlutoUI # To enable table of contentss
 
 # ╔═╡ 37c90723-2e16-4e40-a259-74edf117c6e2
 using Zygote # For gradient dict
@@ -27,6 +27,9 @@ using MLDatasets # For loading the FMNIST dataset
 
 # ╔═╡ 118b4c69-d21a-4a35-909a-f1631e83b917
 using Plots # For plotting
+
+# ╔═╡ 136b876c-f545-46ac-befd-af7d37ea9d93
+using Statistics # For mean
 
 # ╔═╡ 8b11badc-2a03-4918-841a-a6459d1aac28
 PlutoUI.TableOfContents(depth = 6)
@@ -92,13 +95,18 @@ md" We will generate some quick random data to try out our energy function with.
 heaviside(x) = 0.5 * (sign(x) + 1)
 
 # ╔═╡ a9c6ecab-bc6c-4565-9a29-7d07b95c2de9
-function init_rbm(;numvisible=784, numhidden=64)
-	
-	# Some initial network parameters
-	W = Flux.glorot_normal(numhidden, numvisible)
-	a = Flux.glorot_normal(numvisible)
-	b = zeros(Float32, numhidden)
-
+function init_rbm(;numvisible=784, numhidden=64, glorot=true)
+	if glorot
+		# Some initial network parameters
+		W = Flux.glorot_normal(numhidden, numvisible)
+		a = Flux.glorot_normal(numvisible)
+		b = zeros(Float32, numhidden)
+	else
+		# The initialization described in the UCD paper by Qiu on page 8
+		W = Flux.randn(Float32, numhidden, numvisible)
+		a = Flux.randn(Float32, numvisible)
+		b = Flux.rand(Float32, numhidden)
+	end
 	return rbmstruct(W, b, a);
 end;
 
@@ -115,7 +123,7 @@ md"$p(\pmb{v},\pmb{h}) = \frac{e^{-E(\pmb{v},\pmb{h})}}{Z}$"
 
 # ╔═╡ b6fc90cf-ca23-49a3-93dc-8bdb9332faec
 md"where $Z$ is given by $Z = \sum_{\pmb{v},\pmb{h}} e^{-E(\pmb{v},\pmb{h})}$. The sum here runs over all possible state pars $(\pmb{v},\pmb{h})$. 
-This factor seems intractable for continuous variables, but tractable (and impractical for moderately sized $\pmb{v}$ and $\pmb{h}$) for binary variables. The probability corresponding to a visible vector $\pmb{v}$ is"
+This factor seems intractable for continuous variables, but tractable (yet impractical for moderately sized $\pmb{v}$ and $\pmb{h}$) for binary variables. The probability corresponding to a visible vector $\pmb{v}$ is"
 
 # ╔═╡ 0c28089b-96ae-4fc7-a6cd-8d865c0f43de
 md"$p(\pmb{v}) = \frac{1}{Z} \sum_{\pmb{h}} e^{-E(\pmb{v},\pmb{h})}$"
@@ -124,16 +132,16 @@ md"$p(\pmb{v}) = \frac{1}{Z} \sum_{\pmb{h}} e^{-E(\pmb{v},\pmb{h})}$"
 md"Fischer and Igel go into more details than Hinton regarding how to compute the gradient of this expression."
 
 # ╔═╡ 01f2b52f-df4a-48cd-90f0-7667f9cff201
-md"$\ln{p(\pmb{v})} = \ln\left(\frac{1}{Z}\sum_{\pmb{h}} e^{-E(\pmb{v},\pmb{h})}\right) = \ln\left(\sum_{\pmb{h}} e^{-E(\pmb{v},\pmb{h})}\right) - \ln\left(\sum_{\pmb{v},\pmb{h}} e^{-E(\pmb{v},\pmb{h})}\right)$"
+md"$\ln{p(\pmb{v})} = \ln\left(\frac{1}{Z}\sum_{\pmb{h}} e^{-E(\pmb{v},\pmb{h})}\right) = \ln\left(\sum_{\pmb{h}} e^{-E(\pmb{v},\pmb{h})}\right) - \ln\left(\sum_{\pmb{v}',\pmb{h}} e^{-E(\pmb{v}',\pmb{h})}\right)$"
 
 # ╔═╡ 597fe1e4-e59b-4792-9ef9-26c53ef09dfc
 md"So the gradient with respect to trainable parameters $\theta=\{W, \pmb{a}, \pmb{b}\}$ then is"
 
 # ╔═╡ b53c7d74-895a-4b86-925f-cc0b60b71b42
-md"$-\sum_{\pmb{h}} p(\pmb{h}| \pmb{v})\frac{\partial E(\pmb{v}, \pmb{h})}{\partial \theta} +\sum_{\pmb{v}, \pmb{h}} p(\pmb{v}, \pmb{h})\frac{\partial E(\pmb{v}, \pmb{h})}{\partial \theta}$"
+md"$\frac{\partial \ln p(\pmb{v})}{\partial \theta} = -\sum_{\pmb{h}} p(\pmb{h}| \pmb{v})\frac{\partial E(\pmb{v}, \pmb{h})}{\partial \theta} +\sum_{\pmb{v}', \pmb{h}} p(\pmb{v}', \pmb{h})\frac{\partial E(\pmb{v}', \pmb{h})}{\partial \theta}$"
 
 # ╔═╡ 9405e99f-c808-48be-86a2-6448e7575e24
-md"where we used $p(h|v) = \frac{p(\pmb{v}, \pmb{h})}{p(\pmb{v})}$. See Fischer and Igelpage 7 for details. The first sum is the expectation values for the gradient under the model distribution and under the conditional distribution of the hidden variables. Evaluating the two sums is not feasible, but we can approximate the expectation values by sampling from the two distributions."
+md"where we used $p(h|v) = \frac{p(\pmb{v}, \pmb{h})}{p(\pmb{v})}$. See Fischer and Igel page 7 for details. The first sum is the expectation values for the gradient of the energy under the data distribution and the second term is the expectation of the gradient of the energy under the model distribution. We can get a good estimate of the first term by averaging the gradient of E produced by a bunch of different datapoints, but the second point is much more tricky!"
 
 # ╔═╡ 201341eb-7ca7-4f49-abb6-42fea86b6675
 md"the derivatives of the energy is given by"
@@ -143,9 +151,6 @@ md"$\frac{\partial E(\pmb{v}, \pmb{h})}{\partial θ}: \begin{cases} \frac{\parti
 
 # ╔═╡ 46cb0ffa-7fc6-4a77-bd92-b1339eb27a21
 md"Hinton uses angle brackets to denote expectation values so in his notation the gradients with respect to $W_{ij}$ would be $\frac{\partial \ln p(\pmb{v})}{\partial W_{ij}} =\langle v_i h_j\rangle_{data} - \langle v_i h_j\rangle_{model}$."
-
-# ╔═╡ 0253c40d-01e0-436e-8a39-5019452ebfca
-md"For a single vector v and h we get the following estimate of the gradient. to get a good approximate for the gradient we would need to sample multiple times for the same datapoint (the units are stochastic), but from Hintons notes it seems that it is sufficient to sample once and then accumulate over multiple datapoints in a minibatch."
 
 # ╔═╡ 64dde393-ac97-4140-a69f-549bd7f7ce85
 function ∇E(v,h, batchsize)
@@ -352,9 +357,7 @@ filters = [imshow(rbm.W'[:,i]) for i=1:64];
 plot(filters..., layout=(8, 8), size=(2000, 2000))
 
 # ╔═╡ 0ca12440-3025-48ff-9aa7-aed2ed01d9f6
-md"## Reconstruction
-- *TODO*: Verify that reconstruction is implemented correctly!
-"
+md"## Reconstruction"
 
 # ╔═╡ 816e0fe7-add7-41e9-8a8c-41d67c44eec8
 function reconstruct(rbm, batchsize)
@@ -376,16 +379,10 @@ end
 x, xrec = reconstruct(rbm, 64);
 
 # ╔═╡ 1098fb24-b08a-4598-b44d-8f356877af25
-img_orig = [imshow(x[:,i]) for i=1:64];
+img_orig = [imshow(x[:,i]) for i=1:64]
 
 # ╔═╡ 004f1d73-b909-47da-b25d-aa83787520e9
-img_rec = [imshow(xrec[:,i]) for i=1:64];
-
-# ╔═╡ b2046d69-f61a-4c47-8277-f8d5029035ac
-plot(img_orig..., layout=(8, 8), size=(1200, 1200))
-
-# ╔═╡ 8799394c-cec1-4555-b4cb-1c4e7f386a33
-plot(img_rec..., layout=(8, 8), size=(1200, 1200))
+img_rec = [imshow(xrec[:,i]) for i=1:64]
 
 # ╔═╡ 79a8e531-6c29-4cf5-8429-0d7474b01f29
 md"# How to train an RBM with UCD
@@ -597,7 +594,8 @@ function trainUCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries)
 			vξₜ, vηₜ₋₁ = deepcopy(vξₖ), deepcopy(vξₖ) 
 			
 			for t=1:tmax
-				vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁ = coupled_inference(vξₖ, hξₖ, vηₜ₋₁, hηₜ₋₁, 															   vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁,															   maxtries,)
+				vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁ = coupled_inference(rbm, 
+															vξₖ, hξₖ, vηₜ₋₁, hηₜ₋₁, 															vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁,																maxtries,)
 				# Check if the chains have met
 				if vξₜ==vηₜ₋₁ && hξₜ==hηₜ₋₁
 					break
@@ -715,16 +713,56 @@ end;
 img_BAS =  [imshow(BAS[:,i], w=4, h=4) for i=1:30]
 
 # ╔═╡ 5844b476-5827-4ba9-bd70-370326cd71ad
-# function logpv()
-	# compute z = Σᵥₕe⁻ᴱ⁽ᵛʰ⁾
-	# compute Σₕe⁻ᴱ⁽ᵛʰ⁾
-# end	
+function get_logpv(rbm, v)
+	#=
+	p(v) = f/Z	
+	Z= Σᵥₕe⁻ᴱ⁽ᵛʰ⁾
+	f = Σₕe⁻ᴱ⁽ᵛʰ⁾
+	
+	⇒ log(p(v)) = log(f) - log(Z)
+				  = log(Σₕe⁻ᴱ⁽ᵛʰ⁾) - log(Σᵥₕe⁻ᴱ⁽ᵛʰ⁾)
+
+	Is the following useful?
+	log(x₁ + x₂ + x₃) + ... = LogSumExp(log(x₁), log(x₂), log(x₃))
+	⇒ log(Σₕe⁻ᴱ⁽ᵛʰ⁾) = LogSumExp(log(exp(-E(v,h₁))), log(exp(-E(v,h₂))), ...)
+	
+	For example consider: given v∈ℝ¹⁶ˣ³⁰ and h∈ℝ¹⁶ˣ³⁰
+	Here we assume 16 input units, 16 hidden units and 30 datapoints.
+	the hidden units
+	=#
+	batchsize = size(v, 2)
+	wv_plus_b = rbm.W*v .+ rbm.b
+	
+	# Compute the logarithm of the partition function Z
+	# TODO: Check this part again!
+	logZ_T1 = sum(v .* rbm.a, dims=1)
+	logZ_T2 = sum(log.(1 .+ exp.(wv_plus_b)), dims=1)
+	logZ = Flux.logsumexp(logZ_T1 .+ logZ_T2)*batchsize
+	
+	T1 = sum(rbm.a .* v) 
+	T2 = sum(log.(1 .+ exp.(wv_plus_b)))
+	f = T1 + T2
+	
+	logpv = f - logZ
+	return logpv
+end	
+
+# ╔═╡ e6cf714c-a541-470f-9396-048c1e81f64f
+#begin
+#	batchsize= 64
+#	rbmBAS = init_rbm(numvisible=16, numhidden=17)
+#	v = rand(Float32, length(rbmBAS.a), batchsize)
+#	wv_plus_b = rbmBAS.W*v .+ rbmBAS.b
+#	logZ_T2 = sum(log.(1 .+ exp.(wv_plus_b)), dims=1)
+#	logZ_T1 = sum(v .* rbmBAS.a, dims=1)
+#end
+
 
 # ╔═╡ 28621b42-f79c-44e8-8838-0d0717c96cee
-function train_BAS_UCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries, x)
+function train_BAS_UCD(rbm; numiter=5, batchsize=64, k=3, tmax, maxtries, x)
 
 	# Choose optimizer
-	η = 0.05; optimizer = Descent(η) # SGD
+	η = 0.01; optimizer = Descent(η) # SGD
 	# η = 0.02; optimizer = Momentum(η)
 	# η = 0.0003; optimizer = ADAM(η)
 	
@@ -732,8 +770,9 @@ function train_BAS_UCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries, x)
 	θ = Flux.params(rbm.W, rbm.a, rbm.b)
     ∇θ = Zygote.Grads(IdDict(), θ)
 	
-	recloss = zeros(Float32, numepochs)
-	
+	recloss = zeros(Float32, numiter)
+	logpv = zeros(Float32, numiter)
+
 	# Arrays for storing the variables
 	numvisible, numhidden = length(rbm.a), length(rbm.b)
 	hpos = zeros(Float32, (numhidden, batchsize))
@@ -745,7 +784,7 @@ function train_BAS_UCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries, x)
 	hηₜ₋₁ = zeros(Float32, (numhidden, batchsize))
 	vηₜ₋₁ = zeros(Float32, (numvisible, batchsize))
 	
-	for epoch=1:numepochs
+	for iteration=1:numiter
 		t1 = time()
 		# The activations for the first term are easy to compute
 		vpos = x
@@ -782,10 +821,10 @@ function train_BAS_UCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries, x)
 				∇ξₜ = ∇E(vξₜ, hξₜ, batchsize)
 				∇combined .+= -∇ηₜ₋₁ .+ ∇ξₜ #∇E(vηₜ₋₁, hηₜ₋₁, batchsize) .+ ∇E(vξₜ, hξₜ, batchsize) 
 			end		
-		end
+	end
 			
-		hξₜ = Flux.σ.(rbm.W * vξₜ .+ rbm.b)
-		hηₜ₋₁ = Flux.σ.(rbm.W * vηₜ₋₁ .+ rbm.b)
+		#hξₜ = Flux.σ.(rbm.W * vξₜ .+ rbm.b)
+		#hηₜ₋₁ = Flux.σ.(rbm.W * vηₜ₋₁ .+ rbm.b)
 			
 		# Compute gradient terms
 		for i=1:3
@@ -794,25 +833,58 @@ function train_BAS_UCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries, x)
 		Flux.Optimise.update!(optimizer, θ, ∇θ)
 
 		
-	recloss[epoch] = reconstruction_loss(rbm , x)
+	recloss[iteration] = reconstruction_loss(rbm , x)
+	logpv[iteration] = get_logpv(rbm, x)
 	t2 = time()
 	# println output printed to console
-	if epoch == 0 || epoch %1000 == 0
-		println("Epoch: ", epoch, "/", numepochs, 
-				":\t recloss = ", round(recloss[epoch], digits=5),
+	if iteration == 1 || iteration %100 == 0
+		println("Epoch: ", iteration, "/", numiter, 
+				":\t recloss = ", round(recloss[iteration], digits=5),
+				":\t ln(p(v)) = ", round(logpv[iteration], digits=5),
 				"\t runtime: ", round(t2-t1, digits=2), " s")
 	end
 	end
-return recloss
+return recloss, logpv
 end
 
 # ╔═╡ 7dd89ba5-e84f-49a7-8047-94f420998ae3
 # Initialize the network
 begin
 	println("\nTraining RBM") # printed to console!
-	rbmBAS = init_rbm(numvisible=16, numhidden=16)
-	recloss_BAS_UCD = train_BAS_UCD(rbmBAS; numepochs=10000, batchsize=30, k=1, tmax=100, maxtries=10, x=BAS);
-end
+	rbmBAS = init_rbm(numvisible=16, numhidden=16, glorot=false)
+	recloss_BAS, logpv_BAS= train_BAS_UCD(rbmBAS; numiter=50000, batchsize=30, k=1, tmax=100, maxtries=10, x=BAS)
+end;
+
+# ╔═╡ 298579b2-9e8e-4970-8d60-66e6a0e97ca7
+img_rbmBAS =  [imshow(rbmBAS.W[i,:], w=4, h=4) for i=1:16]
+
+# ╔═╡ c208d6b2-1004-48c0-91b0-486e71848fe9
+md"The reconstruction loss is plotted below. The sliders can be used to adjust the plotting range and the *radius* of the averaging filter."
+
+# ╔═╡ 96490df9-a129-45a7-9280-7a2e97b25bd7
+md"
+- start index:    $(@bind a Slider(1:length(recloss_BAS); default=1, show_value=true))
+- stop index:    $(@bind b Slider(1:length(recloss_BAS); default=length(recloss_BAS), show_value=true))
+- filter radius:    $(@bind c Slider(0 : 1 : 200; default=20, show_value=true))"
+
+# ╔═╡ c83fe515-597f-46be-9d0c-00e4329b2ab0
+begin
+	smooth = [mean(recloss_BAS[i-c:i+c]) for i=c+1:length(recloss_BAS)-c]
+	#smooth = [smooth[1], smooth[1], smooth..., smooth[end], smooth[end]]
+	pad_start = smooth[1]*ones(Float32, c)
+	pad_end = smooth[end]*ones(Float32, c)
+	smooth = hcat(pad_start..., smooth..., pad_end...)[:]
+	BAS_recloss_array = hcat(recloss_BAS, smooth)
+end;
+
+# ╔═╡ ba6213b0-4459-4083-84d9-d46d94733c81
+plot(a:b, BAS_recloss_array[a:b,:], w=3, labels=["rec loss" "smoothened rec loss"])
+
+# ╔═╡ 166c56cc-1043-4914-8fe8-9863d17e382e
+
+
+# ╔═╡ 0e637818-ad47-4732-b441-61cc17512903
+
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -821,6 +893,7 @@ Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 MLDatasets = "eb30cadb-4394-5ae3-aed4-317e484a6458"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
@@ -1983,6 +2056,7 @@ version = "0.9.1+5"
 # ╠═61ce3068-a319-4f67-b4fd-25745727f0a1
 # ╠═360c13ed-0452-4811-a192-fa21968aae04
 # ╠═118b4c69-d21a-4a35-909a-f1631e83b917
+# ╠═136b876c-f545-46ac-befd-af7d37ea9d93
 # ╠═8b11badc-2a03-4918-841a-a6459d1aac28
 # ╟─ef35700e-8df6-4446-b9f4-2e82bf8801c0
 # ╟─9e830b5e-f37f-11eb-083f-277a24c3cd6c
@@ -2009,7 +2083,6 @@ version = "0.9.1+5"
 # ╟─201341eb-7ca7-4f49-abb6-42fea86b6675
 # ╟─7f4d003b-7cd2-4513-8396-d551d19fbff8
 # ╟─46cb0ffa-7fc6-4a77-bd92-b1339eb27a21
-# ╟─0253c40d-01e0-436e-8a39-5019452ebfca
 # ╠═64dde393-ac97-4140-a69f-549bd7f7ce85
 # ╟─282f9d60-8d8a-40dd-b077-4afe3b3d6313
 # ╟─e1880f54-cfc9-485e-b219-7849a893a838
@@ -2042,8 +2115,6 @@ version = "0.9.1+5"
 # ╠═9cef19bc-5295-456d-b6fe-a7cb1099fa6f
 # ╠═1098fb24-b08a-4598-b44d-8f356877af25
 # ╠═004f1d73-b909-47da-b25d-aa83787520e9
-# ╠═b2046d69-f61a-4c47-8277-f8d5029035ac
-# ╠═8799394c-cec1-4555-b4cb-1c4e7f386a33
 # ╟─79a8e531-6c29-4cf5-8429-0d7474b01f29
 # ╟─a1afe50c-3d5c-4c50-99dd-73aef979e24a
 # ╟─3794e224-9bba-481d-b072-4abde652c627
@@ -2076,10 +2147,18 @@ version = "0.9.1+5"
 # ╟─8b8e35ba-b332-4afc-a8c5-865d73775fa9
 # ╟─42aa9749-c4da-4aa9-a89d-c9323bf837ec
 # ╟─2a7c2484-9928-4432-9450-f2823d3a75eb
-# ╠═d033638d-f0f6-46db-80bf-648b39a52f33
+# ╟─d033638d-f0f6-46db-80bf-648b39a52f33
 # ╟─c2e9f61c-2316-4f45-8709-97b9268b0795
 # ╠═5844b476-5827-4ba9-bd70-370326cd71ad
+# ╠═e6cf714c-a541-470f-9396-048c1e81f64f
 # ╠═28621b42-f79c-44e8-8838-0d0717c96cee
 # ╠═7dd89ba5-e84f-49a7-8047-94f420998ae3
+# ╠═298579b2-9e8e-4970-8d60-66e6a0e97ca7
+# ╟─c208d6b2-1004-48c0-91b0-486e71848fe9
+# ╠═96490df9-a129-45a7-9280-7a2e97b25bd7
+# ╟─c83fe515-597f-46be-9d0c-00e4329b2ab0
+# ╠═ba6213b0-4459-4083-84d9-d46d94733c81
+# ╠═166c56cc-1043-4914-8fe8-9863d17e382e
+# ╠═0e637818-ad47-4732-b441-61cc17512903
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
