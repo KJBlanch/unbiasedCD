@@ -99,7 +99,7 @@ function init_rbm(;numvisible=784, numhidden=64, glorot=true)
 	if glorot
 		# Some initial network parameters
 		W = Flux.glorot_normal(numhidden, numvisible)
-		a = Flux.glorot_normal(numvisible)
+		a = zeros(numvisible)
 		b = zeros(Float32, numhidden)
 	else
 		# The initialization described in the UCD paper by Qiu on page 8
@@ -338,11 +338,11 @@ md"We can now initialize an RBM with random weights and train it!."
 
 # ╔═╡ 944f0cf9-8302-41f4-9b9d-f90523827bac
 # Initialize the network
-begin
+#=begin
 	println("\nTraining RBM") # printed to console!
 	rbm = init_rbm(numvisible=784, numhidden=64)
 	recloss = train(rbm, numepochs=5, batchsize=64, k=3);
-end
+end=#
 
 # ╔═╡ 711787c1-f8fc-4fac-92c2-21a01ab4937d
 md"## Visualizing the filters"
@@ -485,10 +485,7 @@ md" ## UCD RBM implementation"
 md"- **Note**: Qiu et al used 1000 parallel Markov chains in their experiments in order to get a better gradient estimate. This makes sense, but might not be necessary for a proof of concept implementation."
 
 # ╔═╡ e97a9dde-5e0f-48ae-a72d-56cea3410ad9
-function transition_density(pv, v)
-	lnT = sum(log.(pv).*v .+ log.(1 .- pv).*(1 .- v))
-	return lnT
-end
+
 
 # ╔═╡ 0593e773-d877-4c8c-ae7f-826cad5cf75a
 function coupled_inference(rbm, vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, # Input variables
@@ -508,7 +505,7 @@ function coupled_inference(rbm, vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, # Input 
 	lnT2 = transition_density(p_vₜ₊₁, vₜ₊₁)
 	
 	# Check if chains meet up
-	if U1 <= exp(lnT1 - lnT2)
+	if exp(U1) <= lnT1 - lnT2
 		vₜ´ = vₜ₊₁
 	# Otherwise repeatedly sample
 	else
@@ -554,6 +551,7 @@ function trainUCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries)
     ∇θ = Zygote.Grads(IdDict(), θ)
 	
 	recloss = zeros(Float32, numepochs)
+	tmean = zeros(Float32, numepochs)
 	
 	# Arrays for storing the variables
 	numvisible, numhidden = length(rbm.a), length(rbm.b)
@@ -597,7 +595,8 @@ function trainUCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries)
 				vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁ = coupled_inference(rbm, 
 															vξₖ, hξₖ, vηₜ₋₁, hηₜ₋₁, 															vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁,																maxtries,)
 				# Check if the chains have met
-				if vξₜ==vηₜ₋₁ && hξₜ==hηₜ₋₁
+				if (vξₜ==vηₜ₋₁ && hξₜ==hηₜ₋₁) || t==tmax
+					tmean[epoch] += t
 					break
 				else
 					#= Add contributions to the gradient estimate
@@ -619,6 +618,7 @@ function trainUCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries)
 
 		end
 		
+		tmean[epoch] /= round(trainloader.nobs/trainloader.batchsize - 0.5)
 		recloss[epoch] = reconstruction_loss(rbm , testloader.data[1])
 		t2 = time()
 		# println output printed to console
@@ -627,16 +627,19 @@ function trainUCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries)
 				"\t runtime: ", round(t2-t1, digits=2), " s")
 
 	end
-	return recloss
+	return recloss, tmean
 end
 
 # ╔═╡ 431a65ad-152f-4686-bfe1-cf856056dffd
 # Initialize the network
-begin
+#=begin
 	println("\nTraining RBM") # printed to console!
-	rbmUCD = init_rbm(numvisible=784, numhidden=64)
-	reclossUCD = trainUCD(rbmUCD, numepochs=5, batchsize=64, k=3, tmax=100, maxtries=10);
+	rbmUCD = init_rbm(numvisible=784, numhidden=16)
+	(reclossUCD, tmean) = trainUCD(rbmUCD, numepochs=2, batchsize=64, k=1, tmax=10, maxtries=10);=#
 end
+
+# ╔═╡ b85a8965-2215-4742-91b5-a60dd4dce499
+tmean
 
 # ╔═╡ 643f9028-1f95-4c0c-b842-7cdbb1603914
 md"### Visualize the UCD trained RBM's filters and reconstructions
@@ -644,7 +647,7 @@ For fun we use sliders to select how many filters and datapoints to visualize.
 "
 
 # ╔═╡ d8152e9d-0846-4f20-9242-3f27d80f3243
-@bind numfilters Slider(1:64; default=8, show_value=true)
+@bind numfilters Slider(1:length(rbmUCD.b); default=8, show_value=true)
 
 # ╔═╡ e675cc20-01b0-44eb-8307-5f12fa8e47d3
 md" $(numfilters) filter(s) selected!"
@@ -653,7 +656,7 @@ md" $(numfilters) filter(s) selected!"
 filtersUCD = [imshow(rbmUCD.W'[:,i]) for i=1:numfilters]
 
 # ╔═╡ 248e57a5-a446-4489-8ef6-a840f08d55b9
-@bind numreconstructions Slider(1:64; default=8, show_value=true)
+@bind numreconstructions Slider(1:length(rbmUCD.b); default=8, show_value=true)
 
 # ╔═╡ a64f08d0-c7c6-4575-af8b-40dbdce4cf5d
 md" $(numreconstructions) datapoint(s) selected!"
@@ -716,7 +719,7 @@ img_BAS =  [imshow(BAS[:,i], w=4, h=4) for i=1:30]
 function get_logpv(rbm, v)
 	#=
 	p(v) = f/Z	
-	Z= Σᵥₕe⁻ᴱ⁽ᵛʰ⁾
+	Z= Σᵥₕe⁻ᴱ⁽ᵛʰ⁾Egelund
 	f = Σₕe⁻ᴱ⁽ᵛʰ⁾
 	
 	⇒ log(p(v)) = log(f) - log(Z)
@@ -725,10 +728,6 @@ function get_logpv(rbm, v)
 	Is the following useful?
 	log(x₁ + x₂ + x₃) + ... = LogSumExp(log(x₁), log(x₂), log(x₃))
 	⇒ log(Σₕe⁻ᴱ⁽ᵛʰ⁾) = LogSumExp(log(exp(-E(v,h₁))), log(exp(-E(v,h₂))), ...)
-	
-	For example consider: given v∈ℝ¹⁶ˣ³⁰ and h∈ℝ¹⁶ˣ³⁰
-	Here we assume 16 input units, 16 hidden units and 30 datapoints.
-	the hidden units
 	=#
 	batchsize = size(v, 2)
 	wv_plus_b = rbm.W*v .+ rbm.b
@@ -745,21 +744,72 @@ function get_logpv(rbm, v)
 	
 	logpv = f - logZ
 	return logpv
-end	
+end 
 
-# ╔═╡ e6cf714c-a541-470f-9396-048c1e81f64f
-#begin
-#	batchsize= 64
-#	rbmBAS = init_rbm(numvisible=16, numhidden=17)
-#	v = rand(Float32, length(rbmBAS.a), batchsize)
-#	wv_plus_b = rbmBAS.W*v .+ rbmBAS.b
-#	logZ_T2 = sum(log.(1 .+ exp.(wv_plus_b)), dims=1)
-#	logZ_T1 = sum(v .* rbmBAS.a, dims=1)
-#end
+# ╔═╡ a7b081dc-ab39-4ffa-a393-8cb7ce51c076
+function lnTᵥ(rbm, v, h)
+	pv = Flux.σ.(rbm.W'*h .+ rbm.a)
+	lnT = sum(log.(pv).*v .+ log.(1 .- pv).*(1 .- v))
+	return lnT
+end
 
+# ╔═╡ b87a54bd-3ff9-4fc6-a898-54029658a0b7
+"""Following algorithm 3 in Qiu's UCD paper"""
+function coupled_inference_2(rbm, vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, # Input variables
+						   vₜ₊₁, hₜ₊₁, vₜ´, hₜ´, # Output variables
+						   maxtries)	
+	U1 = rand()
+	Z1 = rand(Float32, size(rbm.a))
+	vₜ₊₁ = Flux.σ.(rbm.W'*hₜ .+ rbm.a) .>= Z1
+
+	# Check if chains meet up
+	if log(U1) <= lnTᵥ(rbm, vₜ₊₁, hₜ₋₁´) - lnTᵥ(rbm, vₜ₊₁, hₜ)  # correct?
+		vₜ´ .= vₜ₊₁
+	# Otherwise repeatedly sample
+	else
+		accept_vₜ₊₁ = false
+		accept_vₜ´ = false
+		for i=1:maxtries
+			U2 = rand(); U2´ = rand(); Z2 = rand(Float32, size(vₜ)[1])
+			# Propose vₜ₊₁
+			if accept_vₜ₊₁ == false
+				vₜ₊₁ .= Flux.σ.(rbm.W'*hₜ .+ rbm.a) .>= Z2
+				accept_vₜ₊₁ = log(U2) > lnTᵥ(rbm, vₜ₊₁, hₜ₋₁´) - lnTᵥ(rbm, vₜ₊₁, hₜ)
+			end
+			# Propose vₜ´
+			if accept_vₜ´ == false
+				vₜ₊₁ .= Flux.σ.(rbm.W'*hₜ .+ rbm.a) .>= Z2
+				accept_vₜ´ = log(U2´) > lnTᵥ(rbm, vₜ´, hₜ) - lnTᵥ(rbm, vₜ´, hₜ₋₁´)
+			end
+		end # end sampling
+	end
+	
+	Z3 = rand(Float32, size(rbm.b))
+	hₜ₊₁ .= (Flux.σ.(rbm.W * vₜ₊₁ .+ rbm.b) .>= Z3)
+	hₜ´ .= (Flux.σ.(rbm.W * vₜ´.+ rbm.b) .>= Z3)
+	
+	return vₜ₊₁, hₜ₊₁, vₜ´, hₜ´
+end
+
+# ╔═╡ 745c499b-4089-4238-ae47-266278247c95
+begin
+	size_h = size(rbm.b)
+	size_v = size(rbm.a)
+	batchsize = 60
+	
+	v = rand(Float32, size_v)
+	h = rand(Float32, size_h)
+
+	pv = Flux.σ.(rbm.W'*h .+ rbm.a)
+	lnT = log.(pv).*v .+ log.(1 .- pv).*(1 .- v)
+
+end;
+
+# ╔═╡ c159ad63-aed4-4dd3-85dc-1f75b3b80627
+log.(pv).*v .+ log.(1 .- pv).*(1 .- v)
 
 # ╔═╡ 28621b42-f79c-44e8-8838-0d0717c96cee
-function train_BAS_UCD(rbm; numiter=5, batchsize=64, k=3, tmax, maxtries, x)
+function train_BAS_UCD(rbm; numiter=5, batchsize=64, k=3, tmax, maxtries, x, UCD=true)
 
 	# Choose optimizer
 	η = 0.01; optimizer = Descent(η) # SGD
@@ -770,6 +820,7 @@ function train_BAS_UCD(rbm; numiter=5, batchsize=64, k=3, tmax, maxtries, x)
 	θ = Flux.params(rbm.W, rbm.a, rbm.b)
     ∇θ = Zygote.Grads(IdDict(), θ)
 	
+	tmean = zeros(Float32, numiter)
 	recloss = zeros(Float32, numiter)
 	logpv = zeros(Float32, numiter)
 
@@ -783,6 +834,8 @@ function train_BAS_UCD(rbm; numiter=5, batchsize=64, k=3, tmax, maxtries, x)
 	vξₜ = zeros(Float32, (numvisible, batchsize))
 	hηₜ₋₁ = zeros(Float32, (numhidden, batchsize))
 	vηₜ₋₁ = zeros(Float32, (numvisible, batchsize))
+	hηₜ = zeros(Float32, (numhidden, batchsize))
+	vηₜ = zeros(Float32, (numvisible, batchsize))
 	
 	for iteration=1:numiter
 		t1 = time()
@@ -801,28 +854,34 @@ function train_BAS_UCD(rbm; numiter=5, batchsize=64, k=3, tmax, maxtries, x)
 		vξₖ, hξₖ = inference_neg!(rbm, vξₖ, hξₖ, k)
 		
 		∇combined = -∇E(vpos, hpos, batchsize) .+ ∇E(vξₖ, hξₖ, batchsize)
-		# ∇pos = -∇E(vpos, hpos, batchsize)
-		# ∇neg1 = ∇E(vξₖ, hξₖ, batchsize)	
-		# ∇combined = [-∇pos[i] + ∇neg1[i] for i=1:3]
 		
 		# (2) get ξₜ terms and (3) the ηₜ₋₁ terms
 		# Is this an appropriate initialization of vξₜ, vηₜ₋₁?
 		vξₜ, vηₜ₋₁ = deepcopy(vξₖ), deepcopy(vξₖ) 
 		
-		for t=1:tmax
-			vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁ = coupled_inference(rbm, vξₖ, hξₖ, vηₜ₋₁, hηₜ₋₁, 															   vξₜ, hξₜ, vηₜ₋₁, hηₜ₋₁,															   maxtries,)
-			# Check if the chains have met
-			if vξₜ==vηₜ₋₁ && hξₜ==hηₜ₋₁
-				break
-			else
-				#= Add contributions to the gradient estimate
-				if the chain has not converged yet. =#
-				∇ηₜ₋₁ = -∇E(vηₜ₋₁, hηₜ₋₁, batchsize) 
-				∇ξₜ = ∇E(vξₜ, hξₜ, batchsize)
-				∇combined .+= -∇ηₜ₋₁ .+ ∇ξₜ #∇E(vηₜ₋₁, hηₜ₋₁, batchsize) .+ ∇E(vξₜ, hξₜ, batchsize) 
-			end		
-	end
-			
+		if UCD == true
+			for t=1:tmax
+				# Here we need to work on each datapoint on it's own.
+				for i=1:batchsize
+					a = view(vξₜ, :, i)
+					b = view(hξₜ, :, i)
+					c = view(vηₜ₋₁, :, i)
+					d = view(hηₜ₋₁, :, i) 
+					a, b, c, d	= coupled_inference_2(rbm, view(vξₖ, :, i), view(hξₖ, :, i), view(vηₜ₋₁, :, i), view(hηₜ₋₁, :, i), view(vξₜ, :, i), view(hξₜ, :, i), view(vηₜ, :, i), view(hηₜ, :, i),  maxtries,)
+				end
+				# Check if the chains have met
+				if (vξₜ==vηₜ₋₁ && hξₜ==hηₜ₋₁) || t==tmax
+					tmean[iteration] += t
+					break
+				else
+					#= Add contributions to the gradient estimate
+					if the chain has not converged yet. =#
+					∇ηₜ₋₁ = -∇E(vηₜ₋₁, hηₜ₋₁, batchsize) 
+					∇ξₜ = ∇E(vξₜ, hξₜ, batchsize)
+					∇combined .+= -∇ηₜ₋₁ .+ ∇ξₜ #∇E(vηₜ₋₁, hηₜ₋₁, batchsize) .+ ∇E(vξₜ, hξₜ, batchsize) 
+				end		
+			end
+		end	
 		#hξₜ = Flux.σ.(rbm.W * vξₜ .+ rbm.b)
 		#hηₜ₋₁ = Flux.σ.(rbm.W * vηₜ₋₁ .+ rbm.b)
 			
@@ -831,29 +890,39 @@ function train_BAS_UCD(rbm; numiter=5, batchsize=64, k=3, tmax, maxtries, x)
 			∇θ.grads[θ[i]] = ∇combined[i]
 		end
 		Flux.Optimise.update!(optimizer, θ, ∇θ)
-
+		
 		
 	recloss[iteration] = reconstruction_loss(rbm , x)
 	logpv[iteration] = get_logpv(rbm, x)
 	t2 = time()
+	runtime = 999 #round(t2-t1, digits=2)
 	# println output printed to console
-	if iteration == 1 || iteration %100 == 0
+	if iteration == 1 || iteration %1000 == 0
 		println("Epoch: ", iteration, "/", numiter, 
 				":\t recloss = ", round(recloss[iteration], digits=5),
 				":\t ln(p(v)) = ", round(logpv[iteration], digits=5),
-				"\t runtime: ", round(t2-t1, digits=2), " s")
+				"\t runtime: ", runtime, " s")
 	end
 	end
-return recloss, logpv
+return recloss, logpv, tmean
 end
 
 # ╔═╡ 7dd89ba5-e84f-49a7-8047-94f420998ae3
 # Initialize the network
 begin
 	println("\nTraining RBM") # printed to console!
-	rbmBAS = init_rbm(numvisible=16, numhidden=16, glorot=false)
-	recloss_BAS, logpv_BAS= train_BAS_UCD(rbmBAS; numiter=50000, batchsize=30, k=1, tmax=100, maxtries=10, x=BAS)
+	rbmBAS = init_rbm(numvisible=16, numhidden=17, glorot=true)
+	(recloss_BAS, logpv_BAS, tmean_BAS) = train_BAS_UCD(rbmBAS; numiter=20000, batchsize=30, k=30, tmax=100, maxtries=10, x=BAS, UCD=true)
 end;
+
+# ╔═╡ f7221906-7e99-468d-8bdb-22c43dd0ad3b
+mean(abs.(rbmBAS.W))
+
+# ╔═╡ aa7b795e-dfd1-4a22-9bb7-1c3eb91cf07d
+rbmBAS.b
+
+# ╔═╡ 25de9c92-669d-4cd0-a467-b2cd69c589f1
+minimum(tmean_BAS)
 
 # ╔═╡ 298579b2-9e8e-4970-8d60-66e6a0e97ca7
 img_rbmBAS =  [imshow(rbmBAS.W[i,:], w=4, h=4) for i=1:16]
@@ -861,29 +930,33 @@ img_rbmBAS =  [imshow(rbmBAS.W[i,:], w=4, h=4) for i=1:16]
 # ╔═╡ c208d6b2-1004-48c0-91b0-486e71848fe9
 md"The reconstruction loss is plotted below. The sliders can be used to adjust the plotting range and the *radius* of the averaging filter."
 
+# ╔═╡ f79c7a7c-8ed1-4739-9ff6-31c075e7c7c2
+rbmBAS.b
+
 # ╔═╡ 96490df9-a129-45a7-9280-7a2e97b25bd7
 md"
 - start index:    $(@bind a Slider(1:length(recloss_BAS); default=1, show_value=true))
 - stop index:    $(@bind b Slider(1:length(recloss_BAS); default=length(recloss_BAS), show_value=true))
-- filter radius:    $(@bind c Slider(0 : 1 : 200; default=20, show_value=true))"
+- filter radius:    $(@bind c Slider(0 : 1 : 50; default=20, show_value=true))"
 
-# ╔═╡ c83fe515-597f-46be-9d0c-00e4329b2ab0
-begin
-	smooth = [mean(recloss_BAS[i-c:i+c]) for i=c+1:length(recloss_BAS)-c]
-	#smooth = [smooth[1], smooth[1], smooth..., smooth[end], smooth[end]]
+# ╔═╡ ac276141-5168-45be-be8f-b8264c35c845
+function smoothen(loss, radius)
+	smooth = [mean(loss[i-c:i+c]) for i=c+1:length(loss)-c]
 	pad_start = smooth[1]*ones(Float32, c)
 	pad_end = smooth[end]*ones(Float32, c)
 	smooth = hcat(pad_start..., smooth..., pad_end...)[:]
-	BAS_recloss_array = hcat(recloss_BAS, smooth)
+	loss_array = hcat(loss, smooth)
 end;
 
-# ╔═╡ ba6213b0-4459-4083-84d9-d46d94733c81
-plot(a:b, BAS_recloss_array[a:b,:], w=3, labels=["rec loss" "smoothened rec loss"])
+# ╔═╡ 11bea68d-2fbb-4740-85bc-2634f9fbd47e
+begin
+	p1 = plot(a:b, smoothen(tmean_BAS, c)[a:b,:], w=3, labels=["t" "smoothened t"], ylim=(0,10), xticks=false)
+	p2 = plot(a:b, smoothen(recloss_BAS, c)[a:b,:], w=3, labels=["rec loss" "smoothened rec loss"], xticks=false)
+	p3 = plot(a:b, smoothen(logpv_BAS, c)[a:b,:], w=3, labels=["log(p(v))" "smoothened log(p(v))"], legend=:bottomright, ylim=(-350, -100))
+	plot(p1, p2, p3, layout=(3, 1), size=(600,400))
+end
 
-# ╔═╡ 166c56cc-1043-4914-8fe8-9863d17e382e
-
-
-# ╔═╡ 0e637818-ad47-4732-b441-61cc17512903
+# ╔═╡ 0fa528aa-5933-404e-b58a-25c3a338f7d8
 
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
@@ -2134,6 +2207,7 @@ version = "0.9.1+5"
 # ╠═0593e773-d877-4c8c-ae7f-826cad5cf75a
 # ╠═c0944ff3-c13a-484d-90ed-8d29bb52bd31
 # ╠═431a65ad-152f-4686-bfe1-cf856056dffd
+# ╠═b85a8965-2215-4742-91b5-a60dd4dce499
 # ╟─643f9028-1f95-4c0c-b842-7cdbb1603914
 # ╟─d8152e9d-0846-4f20-9242-3f27d80f3243
 # ╟─e675cc20-01b0-44eb-8307-5f12fa8e47d3
@@ -2150,15 +2224,21 @@ version = "0.9.1+5"
 # ╟─d033638d-f0f6-46db-80bf-648b39a52f33
 # ╟─c2e9f61c-2316-4f45-8709-97b9268b0795
 # ╠═5844b476-5827-4ba9-bd70-370326cd71ad
-# ╠═e6cf714c-a541-470f-9396-048c1e81f64f
+# ╠═a7b081dc-ab39-4ffa-a393-8cb7ce51c076
+# ╠═b87a54bd-3ff9-4fc6-a898-54029658a0b7
+# ╠═745c499b-4089-4238-ae47-266278247c95
+# ╠═c159ad63-aed4-4dd3-85dc-1f75b3b80627
 # ╠═28621b42-f79c-44e8-8838-0d0717c96cee
+# ╠═f7221906-7e99-468d-8bdb-22c43dd0ad3b
 # ╠═7dd89ba5-e84f-49a7-8047-94f420998ae3
+# ╠═aa7b795e-dfd1-4a22-9bb7-1c3eb91cf07d
+# ╠═25de9c92-669d-4cd0-a467-b2cd69c589f1
 # ╠═298579b2-9e8e-4970-8d60-66e6a0e97ca7
 # ╟─c208d6b2-1004-48c0-91b0-486e71848fe9
-# ╠═96490df9-a129-45a7-9280-7a2e97b25bd7
-# ╟─c83fe515-597f-46be-9d0c-00e4329b2ab0
-# ╠═ba6213b0-4459-4083-84d9-d46d94733c81
-# ╠═166c56cc-1043-4914-8fe8-9863d17e382e
-# ╠═0e637818-ad47-4732-b441-61cc17512903
+# ╠═f79c7a7c-8ed1-4739-9ff6-31c075e7c7c2
+# ╟─96490df9-a129-45a7-9280-7a2e97b25bd7
+# ╟─ac276141-5168-45be-be8f-b8264c35c845
+# ╠═11bea68d-2fbb-4740-85bc-2634f9fbd47e
+# ╠═0fa528aa-5933-404e-b58a-25c3a338f7d8
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
