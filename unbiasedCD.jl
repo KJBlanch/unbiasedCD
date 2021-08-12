@@ -109,9 +109,9 @@ function init_rbm(;numvisible=784, numhidden=64, glorot=true)
 		b = zeros(Float32, numhidden)
 	else
 		# The initialization described in the UCD paper by Qiu on page 8
-		W = Flux.randn(Float32, numhidden, numvisible)
-		a = Flux.randn(Float32, numvisible)
-		b = Flux.rand(Float32, numhidden)
+		W = Flux.rand(Float32, numhidden, numvisible) .-0.5
+		a = Flux.zeros(Float32, numvisible)
+		b = Flux.zeros(Float32, numhidden)
 	end
 	return rbmstruct(W, b, a);
 end;
@@ -815,13 +815,30 @@ function coupled_inference_2(rbm, vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, # Inpu
 	return vₜ₊₁, hₜ₊₁, vₜ´, hₜ´
 end
 
+# ╔═╡ 535c8a18-b6f3-4a14-b4a4-4c965b00c85d
+function reconstruction_loss2(rbm , xtest)
+	
+	vin = xtest
+	
+	r = rand(Float32, size(rbm.b, size(xtest)[2]))
+	h = Flux.σ.(rbm.W * vin .+ rbm.b)
+	h = h .> r	
+	
+	# r = rand(Float32, size(rbm.a))
+	vout = Flux.σ.(rbm.W' * h .+ rbm.a) # transpose W?
+	vout = vout .> 0.5
+	
+	loss = Flux.Losses.mse(vin, vout)
+	return loss
+end
+
 # ╔═╡ 28621b42-f79c-44e8-8838-0d0717c96cee
 function train_BAS_UCD(rbm; numiter=5, batchsize=30, k=1, tmax, maxtries, x, UCD=true)
 	
 	runtime = 0
 	
 	# Choose optimizer
-	η = 0.03; optimizer = Descent(η) # SGD
+	η = 0.01; optimizer = Descent(η) # SGD
 	# η = 0.02; optimizer = Momentum(η)
 	#η = 0.0003; optimizer = ADAM(η)
 	
@@ -888,15 +905,16 @@ function train_BAS_UCD(rbm; numiter=5, batchsize=30, k=1, tmax, maxtries, x, UCD
 						break
 					# If not converged we add contribution to gradient
 					else
-						∇ηₜ₋₁ = -∇E(vηₜ₋₁ⁱ, hηₜ₋₁ⁱ, batchsize) 
+						#vηₜ₋₁ⁱ = Flux.σ.(rbm.W' * hηₜ₋₁ⁱ .+ rbm.a)
+						#vξₜⁱ = Flux.σ.(rbm.W' * hξₜⁱ .+ rbm.a)
+						∇ηₜ₋₁ = ∇E(vηₜ₋₁ⁱ, hηₜ₋₁ⁱ, batchsize) 
 						∇ξₜ = ∇E(vξₜⁱ, hξₜⁱ, batchsize)
 						∇combined .+= (-∇ηₜ₋₁ .+ ∇ξₜ)
 					end
 				end
 			end
 		end
-		
-			
+
 		# update weights
 		for i=1:3
 			∇θ.grads[θ[i]] = ∇combined[i]
@@ -904,13 +922,13 @@ function train_BAS_UCD(rbm; numiter=5, batchsize=30, k=1, tmax, maxtries, x, UCD
 		Flux.Optimise.update!(optimizer, θ, ∇θ)
 		
 		
-	recloss[iteration] = reconstruction_loss(rbm , x)
+	recloss[iteration] = reconstruction_loss2(rbm , x)
 	logpv[iteration] = get_logpv(rbm, x)
 	tmean[iteration] /= batchsize
 	t2 = time()
 	runtime += t2-t1
 	# println output printed to console (and not to notebook)
-	if iteration == 1 || iteration %1000 == 0
+	if iteration == 1 || iteration %500 == 0
 		runtime = round(runtime, digits=2)
 		println("Iteration: ", iteration, "/", numiter, 
 				":\t recloss = ", round(recloss[iteration], digits=3),
@@ -927,24 +945,52 @@ end
 begin
 	Random.seed!(3)
 	println("\nTraining RBM") # printed to console!
-	rbmBAS = init_rbm(numvisible=16, numhidden=17, glorot=false)
-	(recloss_BAS, logpv_BAS, tmean_BAS) = train_BAS_UCD(rbmBAS; numiter=50000, batchsize=30, k=1, tmax=100, maxtries=10, x=BAS, UCD=true)
+	rbmBAS = init_rbm(numvisible=16, numhidden=16, glorot=false)
+	(recloss_BAS, logpv_BAS, tmean_BAS) = train_BAS_UCD(rbmBAS; numiter=20000, batchsize=30, k=1, tmax=100, maxtries=10, x=BAS, UCD=true)
 end;
 
 # ╔═╡ 899e6331-faff-4a0a-ae13-7ba6ea32bc6a
 tmean_BAS
 
+# ╔═╡ 07353cda-1af9-447f-8801-62363b235c49
+md"Here are the learned filters."
+
 # ╔═╡ 298579b2-9e8e-4970-8d60-66e6a0e97ca7
 img_rbmBAS =  [imshow(rbmBAS.W[i,:], w=4, h=4) for i=1:16]
+
+# ╔═╡ 90a1b9b3-8486-4174-8ad6-46cee242d135
+md"Let's see how the reconstructions look!"
+
+# ╔═╡ 7841210a-1ff2-4ec4-8d82-4aa99cf33ad7
+function reconstruct2(rbm, batchsize, x)
+
+	vin = x
+	
+	r = rand(Float32, size(rbm.b, batchsize))
+	h = Flux.σ.(rbm.W * vin .+ rbm.b)
+	h = h .> r	
+	
+	#r = rand(Float32, size(rbm.a))
+	vout = Flux.σ.(rbm.W' * h .+ rbm.a) # transpose W?
+	#vout = vout .> r
+	
+	return vout
+end
+
+# ╔═╡ abb2d991-f6a9-46b5-8f86-008a72fdeab7
+xrecBAS = reconstruct2(rbmBAS, 30, BAS);
+
+# ╔═╡ 543078b8-2445-4acd-a77d-a8429c4cdbef
+img_BAS2 =  [imshow(BAS[:,i], w=4, h=4) for i=1:30]
+
+# ╔═╡ 1530b5f8-00eb-4094-8c4a-f3db351f497a
+img_BAS_rec =  [imshow(xrecBAS[:,i], w=4, h=4) for i=1:30]
 
 # ╔═╡ c208d6b2-1004-48c0-91b0-486e71848fe9
 md"The reconstruction loss is plotted below. The sliders can be used to adjust the plotting range and the *radius* of the averaging filter."
 
-# ╔═╡ c43af0fd-ee32-4af5-bab6-72c53ade025e
-
-
-# ╔═╡ f79c7a7c-8ed1-4739-9ff6-31c075e7c7c2
-rbmBAS.b
+# ╔═╡ f51031a1-2bbe-4c85-bee9-dbd883f22448
+md"The dataset has 30 datapoints, so the log-likelihood of a perfectly fit model is $30\ln(1/30)=-102.035$."
 
 # ╔═╡ 96490df9-a129-45a7-9280-7a2e97b25bd7
 md"
@@ -963,13 +1009,16 @@ end;
 
 # ╔═╡ 11bea68d-2fbb-4740-85bc-2634f9fbd47e
 begin
-	p1 = plot(a:b, smoothen(tmean_BAS, c)[a:b,:], w=3, labels=["t" "smoothened t"], ylim=(0,20), xticks=false)
+	p1 = plot(a:b, smoothen(tmean_BAS, c)[a:b,:], w=3, labels=["t" "smoothened t"], ylim=(0,5), xticks=false)
 	p2 = plot(a:b, smoothen(recloss_BAS, c)[a:b,:], w=3, labels=["rec loss" "smoothened rec loss"], xticks=false)
-	p3 = plot(a:b, smoothen(logpv_BAS, c)[a:b,:], w=3, labels=["log(p(v))" "smoothened log(p(v))"], legend=:bottomright, ylim=(-600, -100))
+	p3 = plot(a:b, smoothen(logpv_BAS, c)[a:b,:], w=3, labels=["log(p(v))" "smoothened log(p(v))"], legend=:bottomright, ylim=(-350, -100))
 	plot(p1, p2, p3, layout=(3, 1), size=(600,400))
 end
 
 # ╔═╡ 0fa528aa-5933-404e-b58a-25c3a338f7d8
+
+
+# ╔═╡ afd46512-47ce-41a7-9338-26644d6e4a9b
 
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
@@ -2243,16 +2292,23 @@ version = "0.9.1+5"
 # ╠═5844b476-5827-4ba9-bd70-370326cd71ad
 # ╠═a7b081dc-ab39-4ffa-a393-8cb7ce51c076
 # ╠═b87a54bd-3ff9-4fc6-a898-54029658a0b7
+# ╠═535c8a18-b6f3-4a14-b4a4-4c965b00c85d
 # ╠═28621b42-f79c-44e8-8838-0d0717c96cee
 # ╠═7dd89ba5-e84f-49a7-8047-94f420998ae3
 # ╠═899e6331-faff-4a0a-ae13-7ba6ea32bc6a
+# ╟─07353cda-1af9-447f-8801-62363b235c49
 # ╠═298579b2-9e8e-4970-8d60-66e6a0e97ca7
+# ╟─90a1b9b3-8486-4174-8ad6-46cee242d135
+# ╟─7841210a-1ff2-4ec4-8d82-4aa99cf33ad7
+# ╠═abb2d991-f6a9-46b5-8f86-008a72fdeab7
+# ╠═543078b8-2445-4acd-a77d-a8429c4cdbef
+# ╠═1530b5f8-00eb-4094-8c4a-f3db351f497a
 # ╟─c208d6b2-1004-48c0-91b0-486e71848fe9
-# ╠═c43af0fd-ee32-4af5-bab6-72c53ade025e
-# ╠═f79c7a7c-8ed1-4739-9ff6-31c075e7c7c2
+# ╟─f51031a1-2bbe-4c85-bee9-dbd883f22448
 # ╟─96490df9-a129-45a7-9280-7a2e97b25bd7
 # ╟─ac276141-5168-45be-be8f-b8264c35c845
 # ╠═11bea68d-2fbb-4740-85bc-2634f9fbd47e
 # ╠═0fa528aa-5933-404e-b58a-25c3a338f7d8
+# ╠═afd46512-47ce-41a7-9338-26644d6e4a9b
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
