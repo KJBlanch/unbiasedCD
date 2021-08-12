@@ -34,6 +34,9 @@ using Statistics # For mean
 # ╔═╡ a1fb6aad-fb1c-4418-9caa-f7add68bf26e
 using LinearAlgebra # For norm
 
+# ╔═╡ f270bf0c-00b6-4308-93bd-2cd0c4dead24
+using Random; Random.seed!(3) # for reproducibility
+
 # ╔═╡ 8b11badc-2a03-4918-841a-a6459d1aac28
 PlutoUI.TableOfContents(depth = 6)
 
@@ -198,10 +201,10 @@ md"So we need two functions. One for infering hidden units in the positive phase
 # ╔═╡ 93ca8efa-1bc5-473c-83cc-5994af633659
 function inference_pos!(rbm, v, h)
 	# Infer the hidden units given fixed visible units
-	# r = rand(Float32, size(h))
-	# p = Flux.σ.(rbm.W * v .+ rbm.b)
-	# h .= p .> r
-	h = Flux.σ.(rbm.W * v .+ rbm.b)
+	r = rand(Float32, size(h))
+	p = Flux.σ.(rbm.W * v .+ rbm.b)
+	h .= p .> r
+	# h = Flux.σ.(rbm.W * v .+ rbm.b)
 	return h
 end
 
@@ -218,7 +221,7 @@ function inference_neg!(rbm, v, h, k)
 		p = Flux.σ.(rbm.W' * h .+ rbm.a)
 		v .= p .> r
 	end
-	h = Flux.σ.(rbm.W * v .+ rbm.b)
+	# h = Flux.σ.(rbm.W * v .+ rbm.b)
 	return v, h
 end
 
@@ -797,8 +800,13 @@ function coupled_inference_2(rbm, vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, # Inpu
 				vₜ´ = Flux.σ.(rbm.W'*hₜ₋₁´ .+ rbm.a) .>= Z2
 				accept_vₜ´ = log(U2´) > lnTᵥ(rbm, vₜ´, hₜ) - lnTᵥ(rbm, vₜ´, hₜ₋₁´)
 			end
-		end 
-	end # end sampling
+			
+			if accept_vₜ₊₁==true && accept_vₜ´==true
+				break
+			end
+			
+		end # end of for i=1:maxtries		
+	end
 	
 	Z3 = rand(Float32, size(rbm.b))
 	hₜ₊₁ = (Flux.σ.(rbm.W * vₜ₊₁ .+ rbm.b) .>= Z3)
@@ -809,11 +817,13 @@ end
 
 # ╔═╡ 28621b42-f79c-44e8-8838-0d0717c96cee
 function train_BAS_UCD(rbm; numiter=5, batchsize=30, k=1, tmax, maxtries, x, UCD=true)
-
+	
+	runtime = 0
+	
 	# Choose optimizer
-	η = 0.05; optimizer = Descent(η) # SGD
+	η = 0.03; optimizer = Descent(η) # SGD
 	# η = 0.02; optimizer = Momentum(η)
-	# η = 0.0003; optimizer = ADAM(η)
+	#η = 0.0003; optimizer = ADAM(η)
 	
 	# We use Zygotes graddict in order to use Flux's optimizers
 	θ = Flux.params(rbm.W, rbm.a, rbm.b)
@@ -840,10 +850,10 @@ function train_BAS_UCD(rbm; numiter=5, batchsize=30, k=1, tmax, maxtries, x, UCD
 		vpos = x
 		hpos = inference_pos!(rbm, vpos, hpos)
 		#= The activations for the second term arer more difficult
-		There are three parts:
+		There are two parts:
 		(1) The ξₖ term, which we typycally fix to use k=1. 
 		We find this by running CD-K.
-		(2) The ξₜ terms and (3) the ηₜ₋₁ terms, which really are the tricky parts 
+		(2) The ξₜ terms and the ηₜ₋₁ terms, which really are the tricky parts 
 		=#
 			
 		# (1) get ξₖ term via CD-k
@@ -852,38 +862,36 @@ function train_BAS_UCD(rbm; numiter=5, batchsize=30, k=1, tmax, maxtries, x, UCD
 		# At this point we have a CD-k gradient estimate
 		∇combined = -∇E(vpos, hpos, batchsize) .+ ∇E(vξₖ, hξₖ, batchsize)
 		
-		# (2) get ξₜ terms and (3) the ηₜ₋₁ terms
+		# (2) get ξₜ terms and the ηₜ₋₁ terms
 		# Is this an appropriate initialization of vξₜ, vηₜ₋₁?
 		vξₜ = deepcopy(vξₖ) 
 		vηₜ₋₁ = deepcopy(vξₖ) 
-		hηₜ₋₁ = Flux.σ.(rbm.W * vηₜ₋₁ .+ rbm.b) .> rand(Float32, size(rbm.b, batchsize))
-		hξₜ = (Flux.σ.(rbm.W * vξₜ .+ rbm.b) .> rand(Float32, size(rbm.b, batchsize)))
+		Z1 = rand(Float32, size(rbm.b, batchsize))
+		Z2 = rand(Float32, size(rbm.b, batchsize))
+		hξₜ = Flux.σ.(rbm.W * vξₜ .+ rbm.b) .> Z1
+		hηₜ₋₁ = Flux.σ.(rbm.W * vηₜ₋₁ .+ rbm.b) .> Z2
 
 		# Perform UCD inference
 		if UCD == true
+			
 			# proces one datapoint at a time
-			for i=1:batchsize
-				#= keep iterating over datapoint until Markov chains
-				have converged, for at most tmax iterations.=#
+			for (vξₜⁱ, hξₜⁱ, vηₜ₋₁ⁱ, hηₜ₋₁ⁱ) in zip(eachcol(vξₜ), eachcol(hξₜ), eachcol(vηₜ₋₁), eachcol(hηₜ₋₁))
+				
+				# Iterate until Markov chains converged
 				for t=1:tmax
-					a = view(vξₜ, :, i)
-					b = view(hξₜ, :, i)
-					c = view(vηₜ₋₁, :, i)
-					d = view(hηₜ₋₁, :, i)
-					#vξₜ[:, i], hξₜ[:, i], vηₜ₋₁[ :, i], hηₜ₋₁[:, i] = coupled_inference_2(rbm, vξₜ[:, i], hξₜ[:, i], vηₜ₋₁[ :, i], hηₜ₋₁[:, i], maxtries,)
-					a, b, c, d = coupled_inference_2(rbm, view(vξₜ, :, i), view(hξₜ, :, i), view(vηₜ₋₁, :, i), view(hηₜ₋₁, :, i), maxtries,)
 
-					if (vξₜ[:,i]==vηₜ₋₁[:,i] && hξₜ[:,i]==hηₜ₋₁[:,i]) || t==tmax
+					vξₜⁱ, hξₜⁱ, vηₜ₋₁ⁱ, hηₜ₋₁ⁱ  = coupled_inference_2(rbm, vξₜⁱ, hξₜⁱ, vηₜ₋₁ⁱ, hηₜ₋₁ⁱ, maxtries,)
+					
+					# break if converged or if we have reached tmax
+					if (vξₜⁱ == vηₜ₋₁ⁱ && hξₜⁱ == hηₜ₋₁ⁱ) || t==tmax
 						tmean[iteration] += t
 						break
+					# If not converged we add contribution to gradient
 					else
-						#= Add contributions to the gradient estimate
-						if the chain has not converged yet. =#
-						∇ηₜ₋₁ = -∇E(vηₜ₋₁[:,i], hηₜ₋₁[:,i], batchsize) 
-						∇ξₜ = ∇E(vξₜ[:,i], hξₜ[:,i], batchsize)
+						∇ηₜ₋₁ = -∇E(vηₜ₋₁ⁱ, hηₜ₋₁ⁱ, batchsize) 
+						∇ξₜ = ∇E(vξₜⁱ, hξₜⁱ, batchsize)
 						∇combined .+= (-∇ηₜ₋₁ .+ ∇ξₜ)
-					end	
-				
+					end
 				end
 			end
 		end
@@ -900,13 +908,15 @@ function train_BAS_UCD(rbm; numiter=5, batchsize=30, k=1, tmax, maxtries, x, UCD
 	logpv[iteration] = get_logpv(rbm, x)
 	tmean[iteration] /= batchsize
 	t2 = time()
-	runtime = round(t2-t1, digits=2)
-	# println output printed to console
-	if iteration == 1 || iteration %100 == 0
-		println("Epoch: ", iteration, "/", numiter, 
-				":\t recloss = ", round(recloss[iteration], digits=5),
-				":\t ln(p(v)) = ", round(logpv[iteration], digits=5),
+	runtime += t2-t1
+	# println output printed to console (and not to notebook)
+	if iteration == 1 || iteration %1000 == 0
+		runtime = round(runtime, digits=2)
+		println("Iteration: ", iteration, "/", numiter, 
+				":\t recloss = ", round(recloss[iteration], digits=3),
+				":\t ln(p(v)) = ", round(logpv[iteration], digits=3),
 				"\t runtime: ", runtime, " s")
+		runtime = 0
 	end
 	end
 return recloss, logpv, tmean
@@ -915,9 +925,10 @@ end
 # ╔═╡ 7dd89ba5-e84f-49a7-8047-94f420998ae3
 # Initialize the network
 begin
+	Random.seed!(3)
 	println("\nTraining RBM") # printed to console!
 	rbmBAS = init_rbm(numvisible=16, numhidden=17, glorot=false)
-	(recloss_BAS, logpv_BAS, tmean_BAS) = train_BAS_UCD(rbmBAS; numiter=10000, batchsize=30, k=1, tmax=100, maxtries=10, x=BAS, UCD=true)
+	(recloss_BAS, logpv_BAS, tmean_BAS) = train_BAS_UCD(rbmBAS; numiter=50000, batchsize=30, k=1, tmax=100, maxtries=10, x=BAS, UCD=true)
 end;
 
 # ╔═╡ 899e6331-faff-4a0a-ae13-7ba6ea32bc6a
@@ -952,7 +963,7 @@ end;
 
 # ╔═╡ 11bea68d-2fbb-4740-85bc-2634f9fbd47e
 begin
-	p1 = plot(a:b, smoothen(tmean_BAS, c)[a:b,:], w=3, labels=["t" "smoothened t"], ylim=(0,10), xticks=false)
+	p1 = plot(a:b, smoothen(tmean_BAS, c)[a:b,:], w=3, labels=["t" "smoothened t"], ylim=(0,20), xticks=false)
 	p2 = plot(a:b, smoothen(recloss_BAS, c)[a:b,:], w=3, labels=["rec loss" "smoothened rec loss"], xticks=false)
 	p3 = plot(a:b, smoothen(logpv_BAS, c)[a:b,:], w=3, labels=["log(p(v))" "smoothened log(p(v))"], legend=:bottomright, ylim=(-600, -100))
 	plot(p1, p2, p3, layout=(3, 1), size=(600,400))
@@ -969,6 +980,7 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MLDatasets = "eb30cadb-4394-5ae3-aed4-317e484a6458"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
@@ -2134,6 +2146,7 @@ version = "0.9.1+5"
 # ╠═118b4c69-d21a-4a35-909a-f1631e83b917
 # ╠═136b876c-f545-46ac-befd-af7d37ea9d93
 # ╠═a1fb6aad-fb1c-4418-9caa-f7add68bf26e
+# ╠═f270bf0c-00b6-4308-93bd-2cd0c4dead24
 # ╠═8b11badc-2a03-4918-841a-a6459d1aac28
 # ╟─ef35700e-8df6-4446-b9f4-2e82bf8801c0
 # ╟─9e830b5e-f37f-11eb-083f-277a24c3cd6c
