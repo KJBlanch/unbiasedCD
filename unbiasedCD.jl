@@ -82,9 +82,9 @@ Where $W$ is a matrix of learnable synaptic weights and $a$ and $b$ are learnabl
 
 # ╔═╡ 5179313d-576f-4433-82cc-bf2cb7907abd
 mutable struct rbmstruct
-	W::Array{Float32, 2}
-	b::Array{Float32, 1}
-	a::Array{Float32, 1}
+	W::Array{Float64, 2}
+	b::Array{Float64, 1}
+	a::Array{Float64, 1}
 end
 
 # ╔═╡ 6d210251-d433-43b6-b515-c852ccbc1feb
@@ -101,21 +101,21 @@ md" We will generate some quick random data to try out our energy function with.
 # heaviside(x) = 0.5 * (sign(x) + 1)
 
 # ╔═╡ a9c6ecab-bc6c-4565-9a29-7d07b95c2de9
-function init_rbm(;numvisible=784, numhidden=64, init="1iu")
+function init_rbm(;numvisible=784, numhidden=64, init="qiu")
 	if init == "glorot"
 		# Some initial network parameters
 		W = Flux.glorot_normal(numhidden, numvisible)
 		a = zeros(numvisible)
-		b = zeros(Float32, numhidden)
+		b = zeros(Float64, numhidden)
 	elseif init == "fischer"
 		#=The initialization used by Asja Fischer in Empirical Analysis of the Divergence of Gibbs Sampling Based Learning Algorithms for Restricted Boltzmann Machines =#
-		W = Flux.rand(Float32, numhidden, numvisible) .-0.5
-		a = Flux.zeros(Float32, numvisible)
-		b = Flux.zeros(Float32, numhidden)
+		W = Flux.rand(Float64, numhidden, numvisible) .-0.5
+		a = Flux.zeros(Float64, numvisible)
+		b = Flux.zeros(Float64, numhidden)
 	elseif init == "qiu"
-		W = 0.1*Flux.randn(Float32, numhidden, numvisible) .-0.5
-		a = 0.1*Flux.randn(Float32, numvisible)
-		b = 0.1*Flux.randn(Float32, numhidden)
+		W = 0.1*Flux.randn(Float64, numhidden, numvisible)
+		a = 0.1*Flux.randn(Float64, numvisible)
+		b = 0.1*Flux.randn(Float64, numhidden)
 	end
 	return rbmstruct(W, b, a);
 end;
@@ -205,7 +205,7 @@ md"So we need two functions. One for infering hidden units in the positive phase
 # ╔═╡ 93ca8efa-1bc5-473c-83cc-5994af633659
 function inference_pos!(rbm, v, h)
 	# Infer the hidden units given fixed visible units
-	r = rand(Float32, size(h))
+	r = rand(Float64, size(h))
 	p = Flux.σ.(rbm.W * v .+ rbm.b)
 	h .= p .> r
 	# h = Flux.σ.(rbm.W * v .+ rbm.b)
@@ -217,11 +217,11 @@ function inference_neg!(rbm, v, h, k)
 	h = Flux.σ.(rbm.W * v .+ rbm.b)
 	for i=1:k
 		# Infer hidden units given the current visible units
-		r = rand(Float32, size(h))
+		r = rand(Float64, size(h))
 		p = Flux.σ.(rbm.W * v .+ rbm.b)
 		h .= p .> r
 		# Infer visible units given the current hidden units
-		r = rand(Float32, size(v))
+		r = rand(Float64, size(v))
 		p = Flux.σ.(rbm.W' * h .+ rbm.a)
 		v .= p .> r
 	end
@@ -238,8 +238,8 @@ function FMNISTdataloader(batchsize)
     ENV["DATADEPS_ALWAYS_ACCEPT"] = "true"
 
     # Loading Dataset	
-    xtrain, ytrain = MLDatasets.FashionMNIST.traindata(Float32)
-    xtest, ytest = MLDatasets.FashionMNIST.testdata(Float32)
+    xtrain, ytrain = MLDatasets.FashionMNIST.traindata(Float64)
+    xtest, ytest = MLDatasets.FashionMNIST.testdata(Float64)
 	
     # Reshape Data in order to flatten each image into a linear array
     xtrain = Flux.flatten(xtrain)
@@ -280,11 +280,11 @@ function reconstruction_loss(rbm , xtest)
 	
 	vin = xtest
 	
-	r = rand(Float32, size(rbm.b, size(xtest)[2]))
+	r = rand(Float64, size(rbm.b, size(xtest)[2]))
 	h = Flux.σ.(rbm.W * vin .+ rbm.b)
 	h = h .> r	
 	
-	#r = rand(Float32, size(rbm.a))
+	#r = rand(Float64, size(rbm.a))
 	vout = Flux.σ.(rbm.W' * h .+ rbm.a) # transpose W?
 	#vout = vout .> r
 	
@@ -305,27 +305,27 @@ function train(rbm; numepochs=5, batchsize=64, k=3)
 	θ = Flux.params(rbm.W, rbm.a, rbm.b)
     ∇θ = Zygote.Grads(IdDict(), θ)
 	
-	recloss = zeros(Float32, numepochs)
+	recloss = zeros(Float64, numepochs)
 	
 	# Arrays for storing the variables
 	numvisible, numhidden = length(rbm.a), length(rbm.b)
-	hpos = zeros(Float32, (numhidden, batchsize))
-	vpos = zeros(Float32, (numvisible, batchsize))
-	hneg = zeros(Float32, (numhidden, batchsize))
-	vneg = zeros(Float32, (numvisible, batchsize))
+	hpos = zeros(Float64, (numhidden, batchsize))
+	vpos = zeros(Float64, (numvisible, batchsize))
+	hneg = zeros(Float64, (numhidden, batchsize))
+	vneg = zeros(Float64, (numvisible, batchsize))
 	
 	
 	for epoch=1:numepochs
 		t1 = time()
 		for (x,y) in trainloader
-			∇combined = [zeros(Float32, size(rbm.W)), zeros(Float32, size(rbm.a)), zeros(Float32, size(rbm.b))]
-			nchains = 10
+			∇combined = [zeros(Float64, size(rbm.W)), zeros(Float64, size(rbm.a)), zeros(Float64, size(rbm.b))]
+			nchains = 1
 			for chain in 1:nchains
 				vpos = x
 				hpos = inference_pos!(rbm, vpos, hpos)
 
 				# Randomly initialize the inputs and perform k Gibbs sampling steps
-				vneg = deepcopy(vpos)#heaviside.(rand(Float32, (numvisible, batchsize)) .- 0.5)
+				vneg = deepcopy(vpos)#heaviside.(rand(Float64, (numvisible, batchsize)) .- 0.5)
 				vneg, hneg = inference_neg!(rbm, vneg, hneg, k)
 
 				# Compute gradient terms
@@ -358,11 +358,11 @@ md"We can now initialize an RBM with random weights and train it!."
 
 # ╔═╡ 944f0cf9-8302-41f4-9b9d-f90523827bac
 # Initialize the network
-begin
+#=begin
 	println("\nTraining RBM") # printed to console!
-	rbm = init_rbm(numvisible=784, numhidden=64)
+	rbm = init_rbm(numvisible=784, numhidden=64, init="glorot")
 	recloss = train(rbm, numepochs=5, batchsize=64, k=3);
-end
+end=#
 
 # ╔═╡ 711787c1-f8fc-4fac-92c2-21a01ab4937d
 md"## Visualizing the filters"
@@ -384,11 +384,11 @@ function reconstruct(rbm, batchsize)
 
 	vin = testloader.data[1][:,1:batchsize];
 	
-	r = rand(Float32, size(rbm.b, batchsize))
+	r = rand(Float64, size(rbm.b, batchsize))
 	h = Flux.σ.(rbm.W * vin .+ rbm.b)
 	h = h .> r	
 	
-	#r = rand(Float32, size(rbm.a))
+	#r = rand(Float64, size(rbm.a))
 	vout = Flux.σ.(rbm.W' * h .+ rbm.a) # transpose W?
 	#vout = vout .> r
 	
@@ -515,7 +515,7 @@ function coupled_inference(rbm, vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, # Input 
 	# Input: ϵₜ = (vₜ, hₜ) and ηₜ₋₁ = (vₜ₋₁´, hₜ₋₁´)
 	# Output: ϵₜ₊₁ = (vₜ₊₁, hₜ₊₁) and ηₜ = (vₜ´, hₜ´)
 	
-	U1 = rand(); Z1 = rand(Float32, size(vₜ)[1])
+	U1 = rand(); Z1 = rand(Float64, size(vₜ)[1])
 	p_vₜ₊₁ = Flux.σ.(rbm.W' * hₜ .+ rbm.a)
 	vₜ₊₁ = p_vₜ₊₁ .>= Z1
 	p_vₜ´ = Flux.σ.(rbm.W' * hₜ .+ rbm.a)
@@ -532,7 +532,7 @@ function coupled_inference(rbm, vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, # Input 
 		accept_vₜ₊₁ = false
 		accept_vₜ´ = false
 		for i=1:maxtries
-			U2 = rand(); U2´ = rand(); Z2 = rand(Float32, size(vₜ)[1])
+			U2 = rand(); U2´ = rand(); Z2 = rand(Float64, size(vₜ)[1])
 			# Propose vₜ₊₁
 			if accept_vₜ₊₁ == false
 				vₜ₊₁ .= p_vₜ₊₁ .>= Z2
@@ -550,7 +550,7 @@ function coupled_inference(rbm, vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, # Input 
 		end # end sampling
 	end
 	
-	Z3 = rand(Float32, size(hₜ)[1])
+	Z3 = rand(Float64, size(hₜ)[1])
 	hₜ₊₁ .= (Flux.σ.(rbm.W * vₜ₊₁ .+ rbm.b) .>= Z3)
 	hₜ´ .= (Flux.σ.(rbm.W * vₜ´.+ rbm.b) .>= Z3)
 	
@@ -570,19 +570,19 @@ function trainUCD(rbm; numepochs=5, batchsize=64, k=3, tmax, maxtries)
 	θ = Flux.params(rbm.W, rbm.a, rbm.b)
     ∇θ = Zygote.Grads(IdDict(), θ)
 	
-	recloss = zeros(Float32, numepochs)
-	tmean = zeros(Float32, numepochs)
+	recloss = zeros(Float64, numepochs)
+	tmean = zeros(Float64, numepochs)
 	
 	# Arrays for storing the variables
 	numvisible, numhidden = length(rbm.a), length(rbm.b)
-	hpos = zeros(Float32, (numhidden, batchsize))
-	vpos = zeros(Float32, (numvisible, batchsize))
-	hξₖ = zeros(Float32, (numhidden, batchsize))
-	vξₖ = zeros(Float32, (numvisible, batchsize))
-	hξₜ = zeros(Float32, (numhidden, batchsize))
-	vξₜ = zeros(Float32, (numvisible, batchsize))
-	hηₜ₋₁ = zeros(Float32, (numhidden, batchsize))
-	vηₜ₋₁ = zeros(Float32, (numvisible, batchsize))
+	hpos = zeros(Float64, (numhidden, batchsize))
+	vpos = zeros(Float64, (numvisible, batchsize))
+	hξₖ = zeros(Float64, (numhidden, batchsize))
+	vξₖ = zeros(Float64, (numvisible, batchsize))
+	hξₜ = zeros(Float64, (numhidden, batchsize))
+	vξₜ = zeros(Float64, (numvisible, batchsize))
+	hηₜ₋₁ = zeros(Float64, (numhidden, batchsize))
+	vηₜ₋₁ = zeros(Float64, (numvisible, batchsize))
 	
 	for epoch=1:numepochs
 		t1 = time()
@@ -717,11 +717,11 @@ begin
 	mask1 = [1 0 0 0; 0 1 0 0; 0 0 1 0; 0 0 0 1]
 	mask0 = [0 0 0 0]
 	mask = vcat(mask4, mask3, mask2, mask1, mask0)
-	bars = [ones(Float32, 4, 4) .* mask[i,:] for i=1:size(mask, 1)]
-	stripes = [ones(Float32, 4, 4) .* mask[i,:]' for i=1:size(mask, 1)]
+	bars = [ones(Float64, 4, 4) .* mask[i,:] for i=1:size(mask, 1)]
+	stripes = [ones(Float64, 4, 4) .* mask[i,:]' for i=1:size(mask, 1)]
 	
 	# Populate columns of BAS matrix 
-	BAS = zeros(Float32, 16, 30)
+	BAS = zeros(Float64, 16, 30)
 	# With stripes examples
 	for i=1:16
 		BAS[:, i] = stripes[i][:]
@@ -730,13 +730,20 @@ begin
 	for i=1:14
 		BAS[:, 16+i] = bars[i+1][:]
 	end
+	# include degenerate cases
+	#for i=1:16
+	#	BAS[:, 16+i] = bars[i][:]
+	#end
 end;
 
 # ╔═╡ c2e9f61c-2316-4f45-8709-97b9268b0795
 img_BAS =  [imshow(BAS[:,i], w=4, h=4) for i=1:30]
 
+# ╔═╡ c2ecf8a3-bc92-4935-bb5f-10938a5a562d
+plot(img_BAS..., layout=(2, 15), size=(1500, 200))
+
 # ╔═╡ 5844b476-5827-4ba9-bd70-370326cd71ad
-function get_logpv(rbm, v)
+function get_logpv_old(rbm, v)
 	#=
 	p(v) = f/Z	
 	Z= Σᵥₕe⁻ᴱ⁽ᵛʰ⁾Egelund
@@ -749,13 +756,19 @@ function get_logpv(rbm, v)
 	log(x₁ + x₂ + x₃) + ... = LogSumExp(log(x₁), log(x₂), log(x₃))
 	⇒ log(Σₕe⁻ᴱ⁽ᵛʰ⁾) = LogSumExp(log(exp(-E(v,h₁))), log(exp(-E(v,h₂))), ...)
 	=#
+	
+	N = 2
+    K = 16
+    vperm = reverse.(Iterators.product(fill(0:N-1,K)...))[:]
+	vperm = 1.0*reshape(reinterpret(Int64, vperm), (16, length(vperm))) # multiply by 1.0 to get Float64
+
 	batchsize = size(v, 2)
-	#wv_plus_b = (rbm.W*v .+ rbm.b) .>= rand(Float32, size(rbm.b))
-	wv_plus_b = rbm.W*v .+ rbm.b
+	#wv_plus_b = (rbm.W*v .+ rbm.b) .>= rand(Float64, size(rbm.b))
+	w_vperm_plus_b = rbm.W*vperm .+ rbm.b
 	
 	# Compute the logarithm of the partition function Z
 	# TODO: Check this part again!
-	logZ_T1 = sum(v .* rbm.a, dims=1)
+	logZ_T1 = sum(vperm .* rbm.a, dims=1)
 	logZ_T2 = sum(log.(1 .+ exp.(wv_plus_b)), dims=1)
 	logZ = Flux.logsumexp(logZ_T1 .+ logZ_T2)*batchsize
 	
@@ -766,6 +779,29 @@ function get_logpv(rbm, v)
 	logpv = f - logZ
 	return logpv
 end 
+
+# ╔═╡ cb3e11f3-1c1d-4382-ba4f-fa4d4ada156b
+function get_logpv(rbm, data, vperm)
+	
+	num_data = size(data)[2]
+
+
+
+	w_vperm_plus_b = rbm.W*vperm .+ rbm.b
+
+	logZ_T1 = sum(vperm .* rbm.a, dims=1)
+	logZ_T2 = sum(log.(1 .+ exp.(w_vperm_plus_b)), dims=1)
+	logZ = Flux.logsumexp(logZ_T1 .+ logZ_T2)
+
+	T1 = sum(rbm.a .* data)
+	T2 = sum(log.(1 .+ exp.(rbm.W*data.+rbm.b)))
+	f = T1 + T2
+
+
+
+	logpv = T1 + T2 - logZ*num_data
+	return logpv
+end
 
 # ╔═╡ a7b081dc-ab39-4ffa-a393-8cb7ce51c076
 function lnTᵥ(rbm, v, h)
@@ -779,7 +815,7 @@ end
 function coupled_inference_2(rbm, vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, maxtries)	
 	
 	U1 = rand()
-	Z1 = rand(Float32, size(vₜ))
+	Z1 = rand(Float64, size(vₜ))
 	vₜ₊₁ = Z1 .<= Flux.σ.(rbm.W'*hₜ .+ rbm.a)
 	
 	# Check if chains meet up
@@ -791,7 +827,7 @@ function coupled_inference_2(rbm, vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, maxtri
 		accept_vₜ₊₁ = false
 		accept_vₜ´ = false
 		for i=1:maxtries
-			U2 = rand(); U2´ = rand(); Z2 = rand(Float32, size(vₜ)[1])
+			U2 = rand(); U2´ = rand(); Z2 = rand(Float64, size(vₜ)[1])
 			
 			# Propose vₜ₊₁
 			if accept_vₜ₊₁ == false
@@ -812,7 +848,7 @@ function coupled_inference_2(rbm, vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, maxtri
 		end # end of for i=1:maxtries		
 	end
 	
-	Z3 = rand(Float32, size(hₜ))
+	Z3 = rand(Float64, size(hₜ))
 	hₜ₊₁ = Z3 .<= Flux.σ.(rbm.W * vₜ₊₁ .+ rbm.b)
 	hₜ´ = Z3 .<= Flux.σ.(rbm.W * vₜ´.+ rbm.b)
 	
@@ -824,11 +860,11 @@ function reconstruction_loss2(rbm , xtest)
 	
 	vin = xtest
 	
-	r = rand(Float32, size(rbm.b, size(xtest)[2]))
+	r = rand(Float64, size(rbm.b, size(xtest)[2]))
 	h = Flux.σ.(rbm.W * vin .+ rbm.b)
 	h = h .> r	
 	
-	# r = rand(Float32, size(rbm.a))
+	# r = rand(Float64, size(rbm.a))
 	vout = Flux.σ.(rbm.W' * h .+ rbm.a) # transpose W?
 	vout = vout .> 0.5
 	
@@ -838,6 +874,10 @@ end
 
 # ╔═╡ 28621b42-f79c-44e8-8838-0d0717c96cee
 function train_BAS_UCD(rbm; numiter=5, batchsize=30, k=1, tmax, maxtries, nchains, x, UCD=true)
+	
+	vperm = reverse.(Iterators.product(fill(0:2-1,16)...))[:]
+	vperm = 1.0*reshape(reinterpret(Int64, vperm), (16, length(vperm))) # multiply by 1.0 to get Float64
+	
 	runtime = 0
 	
 	# Choose optimizer
@@ -849,25 +889,33 @@ function train_BAS_UCD(rbm; numiter=5, batchsize=30, k=1, tmax, maxtries, nchain
 	θ = Flux.params(rbm.W, rbm.a, rbm.b)
     ∇θ = Zygote.Grads(IdDict(), θ)
 	
-	tmean = [zeros(Float32, numiter) for i=1:nchains]
-	recloss = zeros(Float32, numiter)
-	logpv = zeros(Float32, numiter)
+	tmean = [zeros(Float64, numiter+1) for i=1:nchains]
+	recloss = []#zeros(Float64, numiter+1)
+	logpv = []#zeros(Float64, numiter+1)
+	checkpoints = []
 
 	# Arrays for storing the variables
 	numvisible, numhidden = length(rbm.a), length(rbm.b)
-	hpos = zeros(Float32, (numhidden, batchsize))
-	vpos = zeros(Float32, (numvisible, batchsize))
-	hξₖ = zeros(Float32, (numhidden, batchsize))
-	vξₖ = zeros(Float32, (numvisible, batchsize))
-	hξₜ = zeros(Float32, (numhidden, batchsize))
-	vξₜ = zeros(Float32, (numvisible, batchsize))
-	hηₜ₋₁ = zeros(Float32, (numhidden, batchsize))
-	vηₜ₋₁ = zeros(Float32, (numvisible, batchsize))
-	∇combined = [[zeros(Float32, size(rbm.W)), zeros(Float32, size(rbm.a)), zeros(Float32, size(rbm.b))] for chain in 1:nchains]
+	hpos = zeros(Float64, (numhidden, batchsize))
+	vpos = zeros(Float64, (numvisible, batchsize))
+	hξₖ = zeros(Float64, (numhidden, batchsize))
+	vξₖ = zeros(Float64, (numvisible, batchsize))
+	hξₜ = zeros(Float64, (numhidden, batchsize))
+	vξₜ = zeros(Float64, (numvisible, batchsize))
+	hηₜ₋₁ = zeros(Float64, (numhidden, batchsize))
+	vηₜ₋₁ = zeros(Float64, (numvisible, batchsize))
+	∇combined = [[zeros(Float64, size(rbm.W)), zeros(Float64, size(rbm.a)), zeros(Float64, size(rbm.b))] for chain in 1:nchains]
+	
+	push!(recloss, reconstruction_loss(rbm , x))
+	push!(logpv, get_logpv(rbm, x, vperm))
+	push!(checkpoints, 0)
+	println("starting metrics: ", 
+					":\t recloss = ", round(recloss[1], digits=3),
+					":\t ln(p(v)) = ", round(logpv[1], digits=3))
 	
 	for iteration=1:numiter
 		t1 = time()
-		∇combined = [[zeros(Float32, size(rbm.W)), zeros(Float32, size(rbm.a)), zeros(Float32, size(rbm.b))] for chain in 1:nchains]
+		∇combined = [[zeros(Float64, size(rbm.W)), zeros(Float64, size(rbm.a)), zeros(Float64, size(rbm.b))] for chain in 1:nchains]
 		#LinearAlgebra.BLAS.set_num_threads(1)
 		@Threads.threads for chain in 1:nchains
 			# The activations for the first term are easy to compute
@@ -897,8 +945,8 @@ function train_BAS_UCD(rbm; numiter=5, batchsize=30, k=1, tmax, maxtries, nchain
 				vξₜ = deepcopy(vξₖ) 
 				vηₜ₋₁ = deepcopy(vξₖ) 
 				hηₜ₋₁ = deepcopy(hξₖ) 
-				Z1 = rand(Float32, size(rbm.b, batchsize))
-				Z2 = rand(Float32, size(rbm.a, batchsize))
+				Z1 = rand(Float64, size(rbm.b, batchsize))
+				Z2 = rand(Float64, size(rbm.a, batchsize))
 				hξₜ = Flux.σ.(rbm.W * vξₜ .+ rbm.b) .> Z1
 				vξₜ = Flux.σ.(rbm.W' * hξₜ .+ rbm.a) .> Z2
 				
@@ -911,7 +959,7 @@ function train_BAS_UCD(rbm; numiter=5, batchsize=30, k=1, tmax, maxtries, nchain
 						vξₜⁱ, hξₜⁱ, vηₜ₋₁ⁱ, hηₜ₋₁ⁱ  = coupled_inference_2(rbm, vξₜⁱ, hξₜⁱ, vηₜ₋₁ⁱ, hηₜ₋₁ⁱ, maxtries,)
 
 						# break if converged or if we have reached tmax
-						if (vξₜⁱ == vηₜ₋₁ⁱ && hξₜⁱ == hηₜ₋₁ⁱ) || t==tmax
+						if vξₜⁱ == vηₜ₋₁ⁱ && hξₜⁱ == hηₜ₋₁ⁱ || t==tmax
 							tmean[chain][iteration] += t
 							break
 						# If not converged we add contribution to gradient
@@ -936,22 +984,26 @@ function train_BAS_UCD(rbm; numiter=5, batchsize=30, k=1, tmax, maxtries, nchain
 		Flux.Optimise.update!(optimizer, θ, ∇θ)
 		
 		
-		recloss[iteration] = reconstruction_loss(rbm , x)
-		logpv[iteration] = get_logpv(rbm, x)
 		t2 = time()
 		runtime += t2-t1
 		# println output printed to console (and not to notebook)
 		if iteration == 1 || iteration % 500 == 0
-			runtime = round(runtime, digits=2)
+			
+			
+			push!(recloss, reconstruction_loss(rbm , x))
+			push!(logpv, get_logpv(rbm, x, vperm))
+			push!(checkpoints, iteration)
+			
+			
 			println("Iteration: ", iteration, "/", numiter, 
-					":\t recloss = ", round(recloss[iteration], digits=3),
-					":\t ln(p(v)) = ", round(logpv[iteration], digits=3),
+				":\t recloss = ", round(recloss[end], digits=3),
+				":\t ln(p(v)) = ", round(logpv[end], digits=3),
 					"\t runtime: ", runtime, " s")
 			runtime = 0
 		end
 	end
 	tmean = sum(tmean)/(batchsize*nchains)
-return recloss, logpv, tmean
+return recloss, logpv, tmean, checkpoints
 end
 
 # ╔═╡ 7dd89ba5-e84f-49a7-8047-94f420998ae3
@@ -960,8 +1012,8 @@ begin
 	Random.seed!(313)
 	println("\nTraining RBM") # printed to console!
 	# init can be either "fischer", "glorot" or "qiu"
-	rbmBAS = init_rbm(numvisible=16, numhidden=17, init="qiu")
-	(recloss_BAS, logpv_BAS, tmean_BAS) = train_BAS_UCD(rbmBAS; numiter=10000, batchsize=30, k=1, tmax=100, maxtries=10, nchains=20, x=BAS, UCD=true)
+	rbmBAS = init_rbm(numvisible=16, numhidden=16, init="qiu")
+	(recloss_BAS, logpv_BAS, tmean_BAS, checkpoint_index) = train_BAS_UCD(rbmBAS; numiter=20000, batchsize=30, k=1, tmax=100, maxtries=10, nchains=100, x=BAS, UCD=true)
 end;
 
 # ╔═╡ 899e6331-faff-4a0a-ae13-7ba6ea32bc6a
@@ -971,7 +1023,13 @@ tmean_BAS
 md"Here are the learned filters."
 
 # ╔═╡ 298579b2-9e8e-4970-8d60-66e6a0e97ca7
-img_rbmBAS =  [imshow(rbmBAS.W[i,:], w=4, h=4) for i=1:16]
+img_rbmBAS =  [imshow(rbmBAS.W[i,:], w=4, h=4) for i=1:16];
+
+# ╔═╡ ce6fcf40-9a74-4054-b13c-ec28b0fb2edb
+plot(img_rbmBAS..., layout=(2, 8), size=(800, 200))
+
+# ╔═╡ ed0ee1c0-3d85-4671-b9fb-f633b1145344
+
 
 # ╔═╡ 90a1b9b3-8486-4174-8ad6-46cee242d135
 md"Let's see how the reconstructions look!"
@@ -981,11 +1039,11 @@ function reconstruct2(rbm, batchsize, x)
 
 	vin = x
 	
-	r = rand(Float32, size(rbm.b, batchsize))
+	r = rand(Float64, size(rbm.b, batchsize))
 	h = Flux.σ.(rbm.W * vin .+ rbm.b)
 	h = h .> r	
 	
-	#r = rand(Float32, size(rbm.a))
+	#r = rand(Float64, size(rbm.a))
 	vout = Flux.σ.(rbm.W' * h .+ rbm.a) # transpose W?
 	#vout = vout .> r
 	
@@ -993,7 +1051,7 @@ function reconstruct2(rbm, batchsize, x)
 end
 
 # ╔═╡ abb2d991-f6a9-46b5-8f86-008a72fdeab7
-xrecBAS = reconstruct2(rbmBAS, 30, BAS).>0.5;
+xrecBAS = reconstruct2(rbmBAS, 30, BAS);#.>0.5;
 
 # ╔═╡ f3dfcc8e-3523-4b4c-9bd9-df9b802bbd64
 @bind startidx Slider(1:size(BAS, 2)-8; default=1)
@@ -1003,6 +1061,12 @@ img_BAS2 =  [imshow(BAS[:,i], w=4, h=4) for i=startidx:startidx+7]
 
 # ╔═╡ 1530b5f8-00eb-4094-8c4a-f3db351f497a
 img_BAS_rec =  [imshow(xrecBAS[:,i], w=4, h=4) for i=startidx:startidx+7]
+
+# ╔═╡ 0c8f8f5e-c9a3-41d6-8c59-66b6bbcc215e
+begin
+	p_rec = [imshow(xrecBAS[:,i], w=4, h=4) for i=1:30]
+	plot(p_rec..., layout=(2, 15), size=(1500, 200))
+end
 
 # ╔═╡ 9c26a012-8723-464f-a965-9f6a07b9e5ab
 tmean_BAS/100
@@ -1017,24 +1081,28 @@ md"The dataset has 30 datapoints, so the log-likelihood of a perfectly fit model
 md"
 - start index:    $(@bind a Slider(1:length(recloss_BAS); default=1, show_value=true))
 - stop index:    $(@bind b Slider(1:length(recloss_BAS); default=length(recloss_BAS), show_value=true))
-- filter radius:    $(@bind c Slider(0 : 1 : 50; default=20, show_value=true))"
+- filter radius:    $(@bind c Slider(0 : 1 : 50; default=50, show_value=true))"
 
 # ╔═╡ ac276141-5168-45be-be8f-b8264c35c845
 function smoothen(loss, radius)
 	smooth = [mean(loss[i-c:i+c]) for i=c+1:length(loss)-c]
-	pad_start = smooth[1]*ones(Float32, c)
-	pad_end = smooth[end]*ones(Float32, c)
+	pad_start = smooth[1]*ones(Float64, c)
+	pad_end = smooth[end]*ones(Float64, c)
 	smooth = hcat(pad_start..., smooth..., pad_end...)[:]
 	loss_array = hcat(loss, smooth)
 end;
 
 # ╔═╡ 11bea68d-2fbb-4740-85bc-2634f9fbd47e
 begin
-	p1 = plot(a:b, smoothen(tmean_BAS, c)[a:b,:], w=3, labels=["t" "smoothened t"], ylim=(0,6), xticks=false)
-	p2 = plot(a:b, smoothen(recloss_BAS, c)[a:b,:], w=3, labels=["rec loss" "smoothened rec loss"], xticks=false)
-	p3 = plot(a:b, smoothen(logpv_BAS, c)[a:b,:], w=3, labels=["log(p(v))" "smoothened log(p(v))"], legend=:bottomright, ylim=(-600, -100))
-	plot(p1, p2, p3, layout=(3, 1), size=(600,400))
+	p1 = plot(1:length(tmean_BAS)-1, smoothen(tmean_BAS[1:end-1], c), w=3, ylim=(0,20), xticks=false, legend=false, ylabel="t")
+	p2 = plot(checkpoint_index, recloss_BAS, w=3, xticks=false, legend=false, ylabel="Rec loss")
+	p3 = plot(checkpoint_index, logpv_BAS, w=3, legend=false, ylim=(-360, -100), ylabel="log-likelihood", xlabel="Iteration")
+	# plot(p2, p3, layout=(2, 1), size=(600,300))
+	plot(p1, p2, p3, layout=(3, 1), size=(600,450))
 end
+
+# ╔═╡ b1a459eb-0724-4fc6-88a1-5ea6aabe4b7f
+tmean_BAS
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2302,9 +2370,11 @@ version = "0.9.1+5"
 # ╟─8b8e35ba-b332-4afc-a8c5-865d73775fa9
 # ╟─42aa9749-c4da-4aa9-a89d-c9323bf837ec
 # ╟─2a7c2484-9928-4432-9450-f2823d3a75eb
-# ╟─d033638d-f0f6-46db-80bf-648b39a52f33
+# ╠═d033638d-f0f6-46db-80bf-648b39a52f33
 # ╟─c2e9f61c-2316-4f45-8709-97b9268b0795
+# ╠═c2ecf8a3-bc92-4935-bb5f-10938a5a562d
 # ╠═5844b476-5827-4ba9-bd70-370326cd71ad
+# ╠═cb3e11f3-1c1d-4382-ba4f-fa4d4ada156b
 # ╠═a7b081dc-ab39-4ffa-a393-8cb7ce51c076
 # ╠═b87a54bd-3ff9-4fc6-a898-54029658a0b7
 # ╠═535c8a18-b6f3-4a14-b4a4-4c965b00c85d
@@ -2313,17 +2383,21 @@ version = "0.9.1+5"
 # ╠═899e6331-faff-4a0a-ae13-7ba6ea32bc6a
 # ╟─07353cda-1af9-447f-8801-62363b235c49
 # ╟─298579b2-9e8e-4970-8d60-66e6a0e97ca7
+# ╠═ce6fcf40-9a74-4054-b13c-ec28b0fb2edb
+# ╠═ed0ee1c0-3d85-4671-b9fb-f633b1145344
 # ╟─90a1b9b3-8486-4174-8ad6-46cee242d135
 # ╠═7841210a-1ff2-4ec4-8d82-4aa99cf33ad7
 # ╠═abb2d991-f6a9-46b5-8f86-008a72fdeab7
 # ╠═f3dfcc8e-3523-4b4c-9bd9-df9b802bbd64
 # ╠═543078b8-2445-4acd-a77d-a8429c4cdbef
 # ╠═1530b5f8-00eb-4094-8c4a-f3db351f497a
+# ╠═0c8f8f5e-c9a3-41d6-8c59-66b6bbcc215e
 # ╠═9c26a012-8723-464f-a965-9f6a07b9e5ab
 # ╟─c208d6b2-1004-48c0-91b0-486e71848fe9
 # ╟─f51031a1-2bbe-4c85-bee9-dbd883f22448
-# ╟─96490df9-a129-45a7-9280-7a2e97b25bd7
+# ╠═96490df9-a129-45a7-9280-7a2e97b25bd7
 # ╟─ac276141-5168-45be-be8f-b8264c35c845
 # ╠═11bea68d-2fbb-4740-85bc-2634f9fbd47e
+# ╠═b1a459eb-0724-4fc6-88a1-5ea6aabe4b7f
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
