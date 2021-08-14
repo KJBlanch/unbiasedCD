@@ -750,6 +750,7 @@ function get_logpv(rbm, v)
 	⇒ log(Σₕe⁻ᴱ⁽ᵛʰ⁾) = LogSumExp(log(exp(-E(v,h₁))), log(exp(-E(v,h₂))), ...)
 	=#
 	batchsize = size(v, 2)
+	#wv_plus_b = (rbm.W*v .+ rbm.b) .>= rand(Float32, size(rbm.b))
 	wv_plus_b = rbm.W*v .+ rbm.b
 	
 	# Compute the logarithm of the partition function Z
@@ -776,6 +777,7 @@ end
 # ╔═╡ b87a54bd-3ff9-4fc6-a898-54029658a0b7
 """Following algorithm 3 in Qiu's UCD paper"""
 function coupled_inference_2(rbm, vₜ, hₜ, vₜ₋₁´, hₜ₋₁´, maxtries)	
+	
 	U1 = rand()
 	Z1 = rand(Float32, size(vₜ))
 	vₜ₊₁ = Z1 .<= Flux.σ.(rbm.W'*hₜ .+ rbm.a)
@@ -955,11 +957,11 @@ end
 # ╔═╡ 7dd89ba5-e84f-49a7-8047-94f420998ae3
 # Initialize the network
 begin
-	Random.seed!(31)
+	Random.seed!(313)
 	println("\nTraining RBM") # printed to console!
 	# init can be either "fischer", "glorot" or "qiu"
-	rbmBAS = init_rbm(numvisible=16, numhidden=16, init="qiu")
-	(recloss_BAS, logpv_BAS, tmean_BAS) = train_BAS_UCD(rbmBAS; numiter=10000, batchsize=30, k=1, tmax=100, maxtries=10, nchains=1, x=BAS, UCD=false)
+	rbmBAS = init_rbm(numvisible=16, numhidden=17, init="qiu")
+	(recloss_BAS, logpv_BAS, tmean_BAS) = train_BAS_UCD(rbmBAS; numiter=10000, batchsize=30, k=1, tmax=100, maxtries=10, nchains=20, x=BAS, UCD=true)
 end;
 
 # ╔═╡ 899e6331-faff-4a0a-ae13-7ba6ea32bc6a
@@ -991,10 +993,10 @@ function reconstruct2(rbm, batchsize, x)
 end
 
 # ╔═╡ abb2d991-f6a9-46b5-8f86-008a72fdeab7
-xrecBAS = reconstruct2(rbmBAS, 16, BAS);
+xrecBAS = reconstruct2(rbmBAS, 30, BAS).>0.5;
 
 # ╔═╡ f3dfcc8e-3523-4b4c-9bd9-df9b802bbd64
-@bind startidx Slider(1:size(BAS, 1)-8; default=1)
+@bind startidx Slider(1:size(BAS, 2)-8; default=1)
 
 # ╔═╡ 543078b8-2445-4acd-a77d-a8429c4cdbef
 img_BAS2 =  [imshow(BAS[:,i], w=4, h=4) for i=startidx:startidx+7]
@@ -1028,7 +1030,7 @@ end;
 
 # ╔═╡ 11bea68d-2fbb-4740-85bc-2634f9fbd47e
 begin
-	p1 = plot(a:b, smoothen(tmean_BAS, c)[a:b,:], w=3, labels=["t" "smoothened t"], ylim=(0,20), xticks=false)
+	p1 = plot(a:b, smoothen(tmean_BAS, c)[a:b,:], w=3, labels=["t" "smoothened t"], ylim=(0,6), xticks=false)
 	p2 = plot(a:b, smoothen(recloss_BAS, c)[a:b,:], w=3, labels=["rec loss" "smoothened rec loss"], xticks=false)
 	p3 = plot(a:b, smoothen(logpv_BAS, c)[a:b,:], w=3, labels=["log(p(v))" "smoothened log(p(v))"], legend=:bottomright, ylim=(-600, -100))
 	plot(p1, p2, p3, layout=(3, 1), size=(600,400))
