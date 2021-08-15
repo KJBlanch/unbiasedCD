@@ -18,7 +18,7 @@ Step 4:
   You will need a modern browser to interact and view the Pluto notebook, and so for this, Firefox or Chrome is recommended. 
   
 Step 5:
-  Open up a new terminal (like step 2) and execute the following:
+  Open up a new Julia terminal (like step 2) and execute the following:
   'using Pluto'
   'Pluto.run()'
   
