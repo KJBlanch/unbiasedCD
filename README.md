@@ -7,7 +7,7 @@ Step 1:
 
 Step 2:
   After installing, verify that your version of Julia is working. Each operating system is slightly different, but you should be able to search for Julia in your applications to open a Julia terminal, or type 'julia' in an open terminal to start the interface. 
-  Once open, you can verify the installation by simply using the command '1 + 1', and you should the correct execution.
+  Once open, you can verify the installation by simply using the command '1 + 1', and you should see the correct execution.
   
 Step 3:
   Install Pluto. Do this by using the command ']'. You should see the line turn blue, and the prompt change to 'pkg', indicating that it is in package mode. 
