@@ -297,7 +297,7 @@ function train(rbm; numepochs=5, batchsize=64, k=3)
 
 	trainloader, testloader = FMNISTdataloader(batchsize)
 	# Choose optimizer
-	η = 0.01; optimizer = Descent(η) # SGD
+	η = 0.1; optimizer = Descent(η) # SGD
 	# η = 0.02; optimizer = Momentum(η)
 	# η = 0.0003; optimizer = ADAM(η)
 	
@@ -358,11 +358,11 @@ md"We can now initialize an RBM with random weights and train it!."
 
 # ╔═╡ 944f0cf9-8302-41f4-9b9d-f90523827bac
 # Initialize the network
-#=begin
+begin
 	println("\nTraining RBM") # printed to console!
 	rbm = init_rbm(numvisible=784, numhidden=64, init="glorot")
 	recloss = train(rbm, numepochs=5, batchsize=64, k=3);
-end=#
+end
 
 # ╔═╡ 711787c1-f8fc-4fac-92c2-21a01ab4937d
 md"## Visualizing the filters"
@@ -502,7 +502,7 @@ md"In the paper they note that one is free to choose k as one pleases, but that 
 md" ## UCD RBM implementation"
 
 # ╔═╡ 243c9723-6e33-4e02-baaa-857d4f4cd344
-md"- **Note**: Qiu et al used 1000 parallel Markov chains in their experiments in order to get a better gradient estimate. This makes sense, but might not be necessary for a proof of concept implementation."
+md"- **Note**: Qiu et al used 1000 parallel Markov chains in their experiments in order to get a better gradient estimate. This makes sense, but in practice the algorithm works with much less as well."
 
 # ╔═╡ e97a9dde-5e0f-48ae-a72d-56cea3410ad9
 
@@ -1013,7 +1013,7 @@ begin
 	println("\nTraining RBM") # printed to console!
 	# init can be either "fischer", "glorot" or "qiu"
 	rbmBAS = init_rbm(numvisible=16, numhidden=16, init="qiu")
-	(recloss_BAS, logpv_BAS, tmean_BAS, checkpoint_index) = train_BAS_UCD(rbmBAS; numiter=20000, batchsize=30, k=1, tmax=100, maxtries=10, nchains=100, x=BAS, UCD=true)
+	(recloss_BAS, logpv_BAS, tmean_BAS, checkpoint_index) = train_BAS_UCD(rbmBAS; numiter=10000, batchsize=30, k=30, tmax=100, maxtries=10, nchains=10, x=BAS, UCD=false)
 end;
 
 # ╔═╡ 899e6331-faff-4a0a-ae13-7ba6ea32bc6a
@@ -1027,9 +1027,6 @@ img_rbmBAS =  [imshow(rbmBAS.W[i,:], w=4, h=4) for i=1:16];
 
 # ╔═╡ ce6fcf40-9a74-4054-b13c-ec28b0fb2edb
 plot(img_rbmBAS..., layout=(2, 8), size=(800, 200))
-
-# ╔═╡ ed0ee1c0-3d85-4671-b9fb-f633b1145344
-
 
 # ╔═╡ 90a1b9b3-8486-4174-8ad6-46cee242d135
 md"Let's see how the reconstructions look!"
@@ -1063,24 +1060,19 @@ img_BAS2 =  [imshow(BAS[:,i], w=4, h=4) for i=startidx:startidx+7]
 img_BAS_rec =  [imshow(xrecBAS[:,i], w=4, h=4) for i=startidx:startidx+7]
 
 # ╔═╡ 0c8f8f5e-c9a3-41d6-8c59-66b6bbcc215e
-begin
-	p_rec = [imshow(xrecBAS[:,i], w=4, h=4) for i=1:30]
-	plot(p_rec..., layout=(2, 15), size=(1500, 200))
-end
-
-# ╔═╡ 9c26a012-8723-464f-a965-9f6a07b9e5ab
-tmean_BAS/100
+#begin
+#	p_rec = [imshow(xrecBAS[:,i], w=4, h=4) for i=1:30]
+#	plot(p_rec..., layout=(2, 15), size=(1500, 200))
+#end
 
 # ╔═╡ c208d6b2-1004-48c0-91b0-486e71848fe9
-md"The reconstruction loss is plotted below. The sliders can be used to adjust the plotting range and the *radius* of the averaging filter."
+md"The reconstruction loss is plotted below. The slider can be used to asjust the *radius* of the averaging filter used to average out the UCD stopping time plot. Note that the stopping time plot is empty when running CDK experiments."
 
 # ╔═╡ f51031a1-2bbe-4c85-bee9-dbd883f22448
 md"The dataset has 30 datapoints, so the log-likelihood of a perfectly fit model is $30\ln(1/30)=-102.035$."
 
 # ╔═╡ 96490df9-a129-45a7-9280-7a2e97b25bd7
 md"
-- start index:    $(@bind a Slider(1:length(recloss_BAS); default=1, show_value=true))
-- stop index:    $(@bind b Slider(1:length(recloss_BAS); default=length(recloss_BAS), show_value=true))
 - filter radius:    $(@bind c Slider(0 : 1 : 50; default=50, show_value=true))"
 
 # ╔═╡ ac276141-5168-45be-be8f-b8264c35c845
@@ -1101,8 +1093,175 @@ begin
 	plot(p1, p2, p3, layout=(3, 1), size=(600,450))
 end
 
-# ╔═╡ b1a459eb-0724-4fc6-88a1-5ea6aabe4b7f
-tmean_BAS
+# ╔═╡ 939fe888-2c67-4f73-95a6-dc1115422256
+md"# FMNIST experiments"
+
+# ╔═╡ 0b932f32-5c80-4759-97d7-19344c11a214
+function train_FMNIST_UCD(rbm; numepochs=5, batchsize=30, k=1, tmax, maxtries, nchains, UCD=true)
+	
+	trainloader, testloader = FMNISTdataloader(batchsize)
+	
+	runtime = 0
+	
+	# Choose optimizer
+	η = 0.03; optimizer = Descent(η) # SGD
+	# η = 0.02; optimizer = Momentum(η)
+	#η = 0.0003; optimizer = ADAM(η)
+	
+	# We use Zygotes graddict in order to use Flux's optimizers
+	θ = Flux.params(rbm.W, rbm.a, rbm.b)
+    ∇θ = Zygote.Grads(IdDict(), θ)
+	
+	tmean = [zeros(Float64, numepochs+1) for i=1:nchains]
+	recloss = []
+	checkpoints = []
+
+	# Arrays for storing the variables
+	numvisible, numhidden = length(rbm.a), length(rbm.b)
+	hpos = zeros(Float64, (numhidden, batchsize))
+	vpos = zeros(Float64, (numvisible, batchsize))
+	hξₖ = zeros(Float64, (numhidden, batchsize))
+	vξₖ = zeros(Float64, (numvisible, batchsize))
+	hξₜ = zeros(Float64, (numhidden, batchsize))
+	vξₜ = zeros(Float64, (numvisible, batchsize))
+	hηₜ₋₁ = zeros(Float64, (numhidden, batchsize))
+	vηₜ₋₁ = zeros(Float64, (numvisible, batchsize))
+	∇combined = [[zeros(Float64, size(rbm.W)), zeros(Float64, size(rbm.a)), zeros(Float64, size(rbm.b))] for chain in 1:nchains]
+	
+	for epoch=1:numepochs # Epochs
+		t1 = time()
+		for (x,y) in trainloader
+			
+			∇combined = [[zeros(Float64, size(rbm.W)), zeros(Float64, size(rbm.a)), zeros(Float64, size(rbm.b))] for chain in 1:nchains]
+			#LinearAlgebra.BLAS.set_num_threads(1)
+			@Threads.threads for chain in 1:nchains
+				# The activations for the first term are easy to compute
+				vpos = x
+				hpos = inference_pos!(rbm, vpos, hpos)
+				#= The activations for the second term arer more difficult
+				There are two parts:
+				(1) The ξₖ term, which we typycally fix to use k=1. 
+				We find this by running CD-K.
+				(2) The ξₜ terms and the ηₜ₋₁ terms, which really are the tricky parts 
+				=#
+
+				# (1) get ξₖ term via CD-k
+				vξₖ = deepcopy(vpos)
+				vξₖ, hξₖ = inference_neg!(rbm, vξₖ, hξₖ, k)
+
+				vξₖ = Flux.σ.(rbm.W' * hξₖ .+ rbm.a)
+				# At this point we have a CD-k gradient estimate
+				∇pos = ∇E(vpos, hpos, batchsize) 
+				∇neg = ∇E(vξₖ, hξₖ, batchsize)
+				∇combined[chain] .+= (-∇pos + ∇neg)
+
+
+				# Perform UCD inference
+				if UCD == true
+					# (2) get ξₜ terms and the ηₜ₋₁ terms
+					vξₜ = deepcopy(vξₖ) 
+					vηₜ₋₁ = deepcopy(vξₖ) 
+					hηₜ₋₁ = deepcopy(hξₖ) 
+					Z1 = rand(Float64, size(rbm.b, batchsize))
+					Z2 = rand(Float64, size(rbm.a, batchsize))
+					hξₜ = Flux.σ.(rbm.W * vξₜ .+ rbm.b) .> Z1
+					vξₜ = Flux.σ.(rbm.W' * hξₜ .+ rbm.a) .> Z2
+
+					# proces one datapoint at a time
+					for (vξₜⁱ, hξₜⁱ, vηₜ₋₁ⁱ, hηₜ₋₁ⁱ) in zip(eachcol(vξₜ), eachcol(hξₜ), eachcol(vηₜ₋₁), eachcol(hηₜ₋₁))
+
+						# Iterate until Markov chains converged
+						for t=1:tmax
+
+							vξₜⁱ, hξₜⁱ, vηₜ₋₁ⁱ, hηₜ₋₁ⁱ  = coupled_inference_2(rbm, vξₜⁱ, hξₜⁱ, vηₜ₋₁ⁱ, hηₜ₋₁ⁱ, maxtries,)
+
+							# break if converged or if we have reached tmax
+							if vξₜⁱ == vηₜ₋₁ⁱ && hξₜⁱ == hηₜ₋₁ⁱ || t==tmax
+								tmean[chain][epoch] += t
+								break
+							# If not converged we add contribution to gradient
+							else
+								vηₜ₋₁ⁱmean = Flux.σ.(rbm.W' * hηₜ₋₁ⁱ .+ rbm.a)
+								vξₜⁱmean = Flux.σ.(rbm.W' * hξₜⁱ .+ rbm.a)
+								∇ηₜ₋₁ = ∇E(vηₜ₋₁ⁱmean, hηₜ₋₁ⁱ, batchsize) 
+								∇ξₜ = ∇E(vξₜⁱmean, hξₜⁱ, batchsize)
+								∇combined[chain] .+= (-∇ηₜ₋₁ .+ ∇ξₜ)
+							end
+						end # End loop over t
+					end # End loop over datapoints
+				end # End UCD inference
+			end # End loop over chains
+			#LinearAlgebra.BLAS.set_num_threads(8)
+
+			# update weights
+			∇combined = sum(∇combined)
+			for i=1:3
+				∇θ.grads[θ[i]] = ∇combined[i]/nchains
+			end
+			Flux.Optimise.update!(optimizer, θ, ∇θ)
+
+
+
+			
+		end # End loop over batch
+		
+		t2 = time()
+		runtime += t2-t1
+		# println output printed to console (and not to notebook)
+
+		push!(recloss, reconstruction_loss(rbm , testloader.data[1]))
+		push!(checkpoints, epoch)
+
+		println("Iteration: ", epoch, "/", numepochs, 
+		     	":\t recloss = ", round(recloss[end], digits=3),
+			    "\t runtime: ", runtime, " s")
+		runtime = 0
+		
+	end # End loop over epochs
+	tmean = sum(tmean)/(trainloader.imax*nchains)
+return recloss, checkpoints, tmean
+end
+
+# ╔═╡ 890e9664-5ce1-4447-8a98-c064ced9b407
+# Initialize the network
+begin
+	Random.seed!(313)
+	println("\nTraining RBM") # printed to console!
+	# init can be either "fischer", "glorot" or "qiu"
+	rbmFMNIST = init_rbm(numvisible=784, numhidden=64, init="glorot")
+	(recloss_FMNIST, checkpoint_index_FMNIST, tmean_FMNIST) = train_FMNIST_UCD(rbmFMNIST; numepochs=10, batchsize=64, k=1, tmax=100, maxtries=10, nchains=10, UCD=true)
+end;
+
+# ╔═╡ 2cab76a8-51dd-4253-95d3-9918b9b5629e
+filtersFMNIST = [imshow(rbmFMNIST.W'[:,i]) for i=1:64]
+
+# ╔═╡ c3b2f752-271c-4929-8ae7-92b05307ad1b
+plot(filtersFMNIST..., layout=(8, 8), size=(2000, 2000))
+
+# ╔═╡ d8725cf9-3b55-44e0-86ab-2e9a5b53340e
+xFMNST, xrecFMNIST = reconstruct(rbmFMNIST, 64);
+
+# ╔═╡ faca3dab-5264-46a5-a944-447d3dda63d0
+begin
+	p_clean = [imshow(xFMNST[:,i], w=28, h=28) for i=1:30]
+	plot(p_clean..., layout=(2, 15), size=(1500, 200))
+end
+
+# ╔═╡ 0d22f27e-3710-4f91-9ead-98a23c1a20b6
+begin
+	p_rec = [imshow(xrecFMNIST[:,i], w=28, h=28) for i=1:30]
+	plot(p_rec..., layout=(2, 15), size=(1500, 200))
+end
+
+# ╔═╡ 973a91ff-8e3e-489b-8627-7f6416b6fac9
+begin
+	p4 = plot(1:length(tmean_FMNIST), tmean_FMNIST, w=3, ylim=(0,3), xticks=false, legend=false, ylabel="t")
+	p5 = plot(checkpoint_index_FMNIST, recloss_FMNIST, w=3, xticks=false, legend=false, ylabel="Rec loss")
+	plot(p4, p5, layout=(2, 1), size=(600,300))
+end
+
+# ╔═╡ 3c7e5f9e-abc0-4183-839c-bd5e43378f1a
+tmean_FMNIST
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -2331,7 +2490,7 @@ version = "0.9.1+5"
 # ╟─711787c1-f8fc-4fac-92c2-21a01ab4937d
 # ╟─09852337-608d-4ef4-819d-74437bf978bc
 # ╠═6cc91180-c85f-4e46-93bb-668234023328
-# ╠═f0c0bf3b-3329-4619-ba86-366b7abe3c79
+# ╟─f0c0bf3b-3329-4619-ba86-366b7abe3c79
 # ╟─0ca12440-3025-48ff-9aa7-aed2ed01d9f6
 # ╠═816e0fe7-add7-41e9-8a8c-41d67c44eec8
 # ╠═9cef19bc-5295-456d-b6fe-a7cb1099fa6f
@@ -2351,7 +2510,7 @@ version = "0.9.1+5"
 # ╟─db748b83-87d9-4354-9a74-b15424119d64
 # ╟─c8c8c68a-826e-4877-88a5-59866f422d40
 # ╟─77b4d504-7eab-49e8-ab5e-b576250c5411
-# ╟─243c9723-6e33-4e02-baaa-857d4f4cd344
+# ╠═243c9723-6e33-4e02-baaa-857d4f4cd344
 # ╠═e97a9dde-5e0f-48ae-a72d-56cea3410ad9
 # ╠═0593e773-d877-4c8c-ae7f-826cad5cf75a
 # ╠═c0944ff3-c13a-484d-90ed-8d29bb52bd31
@@ -2384,20 +2543,27 @@ version = "0.9.1+5"
 # ╟─07353cda-1af9-447f-8801-62363b235c49
 # ╟─298579b2-9e8e-4970-8d60-66e6a0e97ca7
 # ╠═ce6fcf40-9a74-4054-b13c-ec28b0fb2edb
-# ╠═ed0ee1c0-3d85-4671-b9fb-f633b1145344
 # ╟─90a1b9b3-8486-4174-8ad6-46cee242d135
-# ╠═7841210a-1ff2-4ec4-8d82-4aa99cf33ad7
+# ╟─7841210a-1ff2-4ec4-8d82-4aa99cf33ad7
 # ╠═abb2d991-f6a9-46b5-8f86-008a72fdeab7
 # ╠═f3dfcc8e-3523-4b4c-9bd9-df9b802bbd64
 # ╠═543078b8-2445-4acd-a77d-a8429c4cdbef
 # ╠═1530b5f8-00eb-4094-8c4a-f3db351f497a
 # ╠═0c8f8f5e-c9a3-41d6-8c59-66b6bbcc215e
-# ╠═9c26a012-8723-464f-a965-9f6a07b9e5ab
 # ╟─c208d6b2-1004-48c0-91b0-486e71848fe9
 # ╟─f51031a1-2bbe-4c85-bee9-dbd883f22448
-# ╠═96490df9-a129-45a7-9280-7a2e97b25bd7
+# ╟─96490df9-a129-45a7-9280-7a2e97b25bd7
 # ╟─ac276141-5168-45be-be8f-b8264c35c845
 # ╠═11bea68d-2fbb-4740-85bc-2634f9fbd47e
-# ╠═b1a459eb-0724-4fc6-88a1-5ea6aabe4b7f
+# ╟─939fe888-2c67-4f73-95a6-dc1115422256
+# ╠═0b932f32-5c80-4759-97d7-19344c11a214
+# ╠═890e9664-5ce1-4447-8a98-c064ced9b407
+# ╠═2cab76a8-51dd-4253-95d3-9918b9b5629e
+# ╠═c3b2f752-271c-4929-8ae7-92b05307ad1b
+# ╠═d8725cf9-3b55-44e0-86ab-2e9a5b53340e
+# ╠═faca3dab-5264-46a5-a944-447d3dda63d0
+# ╠═0d22f27e-3710-4f91-9ead-98a23c1a20b6
+# ╠═973a91ff-8e3e-489b-8627-7f6416b6fac9
+# ╠═3c7e5f9e-abc0-4183-839c-bd5e43378f1a
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
