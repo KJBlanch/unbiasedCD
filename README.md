@@ -1,4 +1,8 @@
-Restricted Boltzmann Machine, Julia Package. 
+# UCD/CDK Restricted Boltzmann Machine
+## Static HTML notebook
+To view a static version of the notebook just download the html file and view it in your browser. An icon in the top right corner of the page will provide instructions for how to run it as an interactive Pluto notebook. We also provide instructions for this below.
+
+## Interactive Pluto Notebook
 
 For use, we recommend running a Pluto notebook locally. The material in this instructional is based on "Computational Thinking, a live online Julia/Pluto textbook, https://computationalthinking.mit.edu"
 
