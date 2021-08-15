@@ -1,6 +1,6 @@
 # UCD/CDK Restricted Boltzmann Machine
 ## Static HTML notebook
-To view a static version of the notebook just download the html file and view it in your browser. An icon in the top right corner of the page will provide instructions for how to run it as an interactive Pluto notebook. We also provide instructions for this below.
+To view a static version of the notebook just download the file "unbiasedCD.jl.html" and view it in your browser. An icon in the top right corner of the page will provide instructions for how to run it as an interactive Pluto notebook. We also provide instructions for this below.
 
 ## Interactive Pluto Notebook
 
